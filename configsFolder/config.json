@@ -1,0 +1,42 @@
+{
+  "region": "EU",
+  "bindAddress": "0.0.0.0",
+  "bindPort": 2001,
+  "publicAddress": "193.70.80.168",
+  "publicPort": 2001,
+  "steamQueryPort": 17777,
+  "a2sQueryEnabled": true,
+  "game": {
+    "name": "Escalation PvP | Teamwork, Squads & Roles",
+    "password": "",
+    "passwordAdmin": "lab6admin",
+    "scenarioId": "{886051359283655E}Missions/Eden_AAS_GreenValley_64_US_USSR.conf",
+    "maxPlayers": 64,
+    "autoJoinable": false,
+    "visible": true,
+    "supportedPlatforms": [
+      "PLATFORM_PC",
+      "PLATFORM_XBL"
+    ],
+    "gameProperties": {
+      "serverMaxViewDistance": 2500,
+      "serverMinGrassDistance": 50,
+      "networkViewDistance": 1000,
+      "disableThirdPerson": true,
+      "fastValidation": true,
+      "battlEye": false,
+      "missionHeader": {
+        "DPL_DiscordChannelName": "LabSix Channel Name",
+        "DPL_DiscordMessageTitle": "LabSix Message Title",
+        "DPL_DiscordChannelId": "put the id of a discord channel here",
+        "DPL_ServerIp": "N/A"
+      }
+    },
+    "mods": [
+      {
+        "modId": "5DAB6E93AA04DBCB",
+        "name": "Escalation - Maps (Dev)"
+      }
+    ]
+  }
+}

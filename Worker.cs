@@ -19,8 +19,11 @@ public class Worker : BackgroundService
     private readonly DockerClient _dockerClient;
     
     private List<string> _previousPicks { get; set; }
-    private const string SERVER_CONFIG_FILE_PATH = "./configsFolder/config.json";
-    private const string LIST_SCENARIOS_FILE_PATH = "./configsFolder/list_scenarios.json";
+    
+    private const string SERVER_CONFIG_FILE_PATH = "/config.json";
+    private const string LIST_SCENARIOS_FILE_PATH = "/list_scenarios.json";
+    
+    private readonly string CONTAINER_NAME = Environment.GetEnvironmentVariable("SERVER_CONTAINER_NAME");
 
     public Worker(ILogger<Worker> logger)
     {
@@ -43,7 +46,7 @@ public class Worker : BackgroundService
                         "name",
                         new Dictionary<string, bool>
                         {
-                            { "discordplayerlist-consumer-1", true}
+                            { CONTAINER_NAME, true}
                         }
                     }
                 }
@@ -67,7 +70,7 @@ public class Worker : BackgroundService
             }
             else
             {
-                _logger.LogCritical("container with name discordplayerlist-consumer-1 not found");
+                _logger.LogCritical("container with name {CONTAINER_NAME} not found", CONTAINER_NAME);
             }
             
             await Task.Delay(5000, stoppingToken);
@@ -78,13 +81,11 @@ public class Worker : BackgroundService
     {
         string configText = File.ReadAllText(SERVER_CONFIG_FILE_PATH);
         var json = JObject.Parse(configText);
-        var scenar = PickRandomScenario();
-        json["game"]["scenarioId"] = scenar;
-        _logger.LogInformation("scenario valid {SelectedScenario}", scenar);
+        var scenarioId = PickRandomScenario();
+        json["game"]["scenarioId"] = scenarioId;
+        _logger.LogInformation("scenario valid {SelectedScenario}", scenarioId);
 
-            
-        var jsonString = JsonConvert.SerializeObject(json, Formatting.Indented);
-        File.WriteAllText(SERVER_CONFIG_FILE_PATH, jsonString);
+        File.WriteAllText(SERVER_CONFIG_FILE_PATH, JsonConvert.SerializeObject(json, Formatting.Indented));
     }
     
     private string PickRandomScenario()
@@ -107,7 +108,7 @@ public class Worker : BackgroundService
 
     }
 
-    private string FindNextScenario(List<string?> list)
+    private string FindNextScenario(List<string> list)
     {
         var scenarioCount = list.Count;
         var i = 0;

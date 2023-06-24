@@ -1,0 +1,15 @@
+version: "3.9"
+
+services:
+  scenario-rotation:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /Users/admin/Site/testFile/config_labsix.json:/config.json
+      - /Users/admin/Site/testFile/listof_scenarios.json:/list_scenarios.json
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - SERVER_CONTAINER_NAME=

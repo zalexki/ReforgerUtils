@@ -34,7 +34,6 @@ public class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-
         while (!stoppingToken.IsCancellationRequested)
         {
             var listParam = new ContainersListParameters
@@ -70,7 +69,7 @@ public class Worker : BackgroundService
             }
             else
             {
-                _logger.LogCritical("container with name {CONTAINER_NAME} not found", CONTAINER_NAME);
+                _logger.LogCritical("container with name {ContainerName} not found", CONTAINER_NAME);
             }
             
             await Task.Delay(5000, stoppingToken);
@@ -90,27 +89,24 @@ public class Worker : BackgroundService
     
     private string PickRandomScenario()
     {
-        var property = JObject.Parse(File.ReadAllText(LIST_SCENARIOS_FILE_PATH))
-            .Property("scenarioList");
-
-        if (property is null)
+        var propertyScenarioList = JObject.Parse(File.ReadAllText(LIST_SCENARIOS_FILE_PATH)).Property("scenarioList");
+        if (propertyScenarioList is null)
         {
-            throw new Exception("list_scenarios.json is missing scenarioList key");
+            throw new Exception("list_scenarios.json is missing scenarioList property");
         }
             
-        var list = property.ToList().Values<string>().ToList();
+        var list = propertyScenarioList.ToList().Values<string>().ToList();
         if (list.Any())
         {
             return FindNextScenario(list);
         }
         
-        throw new Exception("list is null");
-
+        throw new Exception("propertyScenarioList is empty");
     }
 
     private string FindNextScenario(List<string> list)
     {
-        var scenarioCount = list.Count;
+        var scenarioListCount = list.Count;
         var i = 0;
 
         while (true)
@@ -120,11 +116,11 @@ public class Worker : BackgroundService
             {
                 throw new Exception("could not randomize scenario, exiting while loop");
             }
-            var randomNumber = new Random().Next(0, scenarioCount - 1);
+            var randomNumber = new Random().Next(0, scenarioListCount - 1);
             string selectedScenario = list[randomNumber];
-            if (selectedScenario is null)
+            if (selectedScenario is null || selectedScenario == string.Empty)
             {
-                throw new Exception("selectedScenario is null");
+                throw new Exception("selectedScenario is null or empty");
             }
 
             if (false == _previousPicks.Any())
@@ -138,7 +134,6 @@ public class Worker : BackgroundService
             if (latestPick != selectedScenario)
             {
                 _previousPicks.Add(selectedScenario);
-
                 if (_previousPicks.Count > 3)
                 {
                     _previousPicks.Remove(_previousPicks.First());

@@ -89,7 +89,7 @@ public class ServerHungDetector : BackgroundService
                             if (DateTime.TryParse(FindDate(dateString), out DateTime logTime))
                             {
                                 _logger.LogInformation("logTime {logTime}", JsonConvert.SerializeObject(logTime, Formatting.Indented));
-                                if (lastLogTime > logTime) 
+                                if (lastLogTime < logTime) 
                                 {
                                     lastLogTime = logTime;
                                 }

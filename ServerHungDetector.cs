@@ -41,7 +41,7 @@ public class ServerHungDetector : BackgroundService
                 _logger.LogInformation($" End Check {containerName}");
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
         }
     }
 
@@ -81,11 +81,16 @@ public class ServerHungDetector : BackgroundService
                     {
                         var logParts = logLine.Split(" ", StringSplitOptions.RemoveEmptyEntries);
                         // _logger.LogInformation("logParts {logParts}", JsonConvert.SerializeObject(logParts, Formatting.Indented));
-
-                        if (DateTime.TryParse(FindDate(logParts[0]), out DateTime logTime))
+                        foreach (var item in logParts)
                         {
-                            _logger.LogInformation("logTime {logTime}", JsonConvert.SerializeObject(logTime, Formatting.Indented));
-                            lastLogTime = logTime;
+                            _logger.LogInformation("item {item}", JsonConvert.SerializeObject(item, Formatting.Indented));
+                            var dateString = FindDate(item);
+
+                            if (dateString != string.Empty && DateTime.TryParse(FindDate(item), out DateTime logTime))
+                            {
+                                _logger.LogInformation("logTime {logTime}", JsonConvert.SerializeObject(logTime, Formatting.Indented));
+                                lastLogTime = logTime;
+                            }
                         }
                     }
                 }

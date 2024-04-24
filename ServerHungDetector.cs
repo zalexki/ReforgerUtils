@@ -66,7 +66,7 @@ public class ServerHungDetector : BackgroundService
             ShowStderr = true,
             Timestamps = true,
             Follow = false,
-            Tail = "1"
+            Tail = "10"
         };
 
         using (var logs = await _dockerClient.Containers.GetContainerLogsAsync(container.ID, logParams))
@@ -84,7 +84,7 @@ public class ServerHungDetector : BackgroundService
 
                         if (DateTime.TryParse(FindDate(logParts[0]), out DateTime logTime))
                         {
-                            // _logger.LogInformation("logTime {logTime}", JsonConvert.SerializeObject(logTime, Formatting.Indented));
+                            _logger.LogInformation("logTime {logTime}", JsonConvert.SerializeObject(logTime, Formatting.Indented));
                             lastLogTime = logTime;
                         }
                     }

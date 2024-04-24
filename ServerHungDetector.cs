@@ -83,7 +83,7 @@ public class ServerHungDetector : BackgroundService
                         // _logger.LogInformation("logParts {logParts}", JsonConvert.SerializeObject(logParts, Formatting.Indented));
                         foreach (var item in logParts)
                         {
-                            _logger.LogInformation("item {item}", JsonConvert.SerializeObject(item, Formatting.Indented));
+                            // _logger.LogInformation("item {item}", JsonConvert.SerializeObject(item, Formatting.Indented));
                             var dateString = FindDate(item);
 
                             if (dateString != string.Empty && DateTime.TryParse(FindDate(item), out DateTime logTime))

@@ -100,9 +100,10 @@ public class ServerHungDetector : BackgroundService
             }
         }
 
-        _logger.LogInformation("TimeDiff is {logTime} and timeout is {timeout}", 
+        _logger.LogInformation("TimeDiff is {logTime} and timeout is {timeout} for {containerName}", 
             JsonConvert.SerializeObject(DateTime.UtcNow - lastLogTime, Formatting.Indented),
-            JsonConvert.SerializeObject(_timeout, Formatting.Indented));
+            JsonConvert.SerializeObject(_timeout, Formatting.Indented),
+            containerName);
         if (DateTime.UtcNow - lastLogTime > _timeout)
         {
             _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds, restarting container: {containerName}");

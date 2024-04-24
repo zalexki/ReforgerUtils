@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,7 +9,6 @@ using Docker.DotNet;
 using Docker.DotNet.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
 
 public class ServerHungDetector : BackgroundService
 {
@@ -23,7 +21,7 @@ public class ServerHungDetector : BackgroundService
     public ServerHungDetector(ILogger<ServerHungDetector> logger)
     {
         _logger = logger;
-        _timeout = TimeSpan.FromSeconds(64);
+        _timeout = TimeSpan.FromSeconds(130);
         _dockerClient = new DockerClientConfiguration().CreateClient();
     }
 

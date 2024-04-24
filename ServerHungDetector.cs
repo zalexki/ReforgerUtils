@@ -97,7 +97,7 @@ public class ServerHungDetector : BackgroundService
             JsonConvert.SerializeObject(_timeout, Formatting.Indented));
         if (DateTime.UtcNow - lastLogTime > _timeout)
         {
-            _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds, FAKE restarting container: {containerName}");
+            _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds, restarting container: {containerName}");
             await _dockerClient.Containers.RestartContainerAsync(container.ID, new ContainerRestartParameters());
         }
     }

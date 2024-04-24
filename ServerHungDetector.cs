@@ -81,11 +81,11 @@ public class ServerHungDetector : BackgroundService
                     if (logLine.Length > 0)
                     {
                         var logParts = logLine.Split(" ", StringSplitOptions.RemoveEmptyEntries);
-                        _logger.LogInformation("logParts {logParts}", JsonConvert.SerializeObject(logParts, Formatting.Indented));
+                        // _logger.LogInformation("logParts {logParts}", JsonConvert.SerializeObject(logParts, Formatting.Indented));
 
                         if (DateTime.TryParse(FindDate(logParts[0]), out DateTime logTime))
                         {
-                            _logger.LogInformation("logTime {logTime}", JsonConvert.SerializeObject(logTime, Formatting.Indented));
+                            // _logger.LogInformation("logTime {logTime}", JsonConvert.SerializeObject(logTime, Formatting.Indented));
                             lastLogTime = logTime;
                         }
                     }
@@ -93,7 +93,7 @@ public class ServerHungDetector : BackgroundService
             }
         }
 
-        _logger.LogInformation("UtcNow {logTime}", JsonConvert.SerializeObject(DateTime.UtcNow, Formatting.Indented));
+        // _logger.LogInformation("UtcNow {logTime}", JsonConvert.SerializeObject(DateTime.UtcNow, Formatting.Indented));
         if (DateTime.UtcNow - lastLogTime > _timeout)
         {
             _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds, restarting container: {containerName}");

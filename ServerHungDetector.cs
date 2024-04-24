@@ -8,6 +8,7 @@ using Docker.DotNet;
 using Docker.DotNet.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 
 public class ServerHungDetector : BackgroundService
 {
@@ -38,7 +39,7 @@ public class ServerHungDetector : BackgroundService
                 await CheckAndRestartContainer(containerName, stoppingToken);
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
         }
     }
 
@@ -55,15 +56,14 @@ public class ServerHungDetector : BackgroundService
             return;
         }
 
-        // Calculate a minute and a half ago
-        DateTime aMinuteAndAHalfAgo = DateTime.UtcNow - _timeout;
         DateTime lastLogTime = DateTime.UtcNow;
+
         var logParams = new ContainerLogsParameters
         {
             ShowStdout = true,
             ShowStderr = true,
             Timestamps = true,
-            Follow = false,
+            Follow = true,
             Tail = "1"
         };
 
@@ -74,30 +74,25 @@ public class ServerHungDetector : BackgroundService
                 using (StreamReader reader = new StreamReader(logs))
                 {
                     string logLine = await reader.ReadToEndAsync();
-                    _logger.LogInformation($"Container {containerName} logLine is {logLine}.");
 
                     if (logLine.Length > 0)
                     {
                         var logParts = logLine.Split(" ", StringSplitOptions.RemoveEmptyEntries);
-                        _logger.LogInformation($"logTime {logParts}");
+                        _logger.LogInformation("logParts {logParts}", JsonConvert.SerializeObject(logParts, Formatting.Indented));
+
                         if (DateTime.TryParse(logParts[0], out DateTime logTime))
                         {
+                            _logger.LogInformation("logParts {logTime}", JsonConvert.SerializeObject(logTime, Formatting.Indented));
                             lastLogTime = logTime;
-                            _logger.LogInformation($"logTime {logTime}");
                         }
                     }
                 }
-            } 
-            
-            // if (logs is null) {
-            //     _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds, restarting container: {containerName}");
-            //     await _dockerClient.Containers.RestartContainerAsync(container.ID, new ContainerRestartParameters());
-            // }
+            }
         }
 
         if (DateTime.UtcNow - lastLogTime > _timeout)
         {
-            _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds, restarting container: {containerName}");
+            Console.WriteLine($"No logs for {_timeout.TotalSeconds} seconds, restarting container: {containerName}");
             await _dockerClient.Containers.RestartContainerAsync(container.ID, new ContainerRestartParameters());
         }
     }

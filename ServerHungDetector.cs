@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Docker.DotNet;
@@ -73,15 +74,21 @@ public class ServerHungDetector : BackgroundService
         {
             if (logs != null)
             {
-                var cleanedLog = await CleanLog(logs);
-
-                var logParts = cleanedLog.Split(" ", StringSplitOptions.RemoveEmptyEntries);
-                _logger.LogInformation("logParts {logParts}", JsonConvert.SerializeObject(logParts, Formatting.Indented));
-
-                if (DateTime.TryParse(logParts[0], out DateTime logTime))
+                using (StreamReader reader = new StreamReader(logs))
                 {
-                    _logger.LogInformation("logTime {logTime}", JsonConvert.SerializeObject(logTime, Formatting.Indented));
-                    lastLogTime = logTime;
+                    string logLine = await reader.ReadToEndAsync();
+
+                    if (logLine.Length > 0)
+                    {
+                        var logParts = logLine.Split(" ", StringSplitOptions.RemoveEmptyEntries);
+                        _logger.LogInformation("logParts {logParts}", JsonConvert.SerializeObject(logParts, Formatting.Indented));
+
+                        if (DateTime.TryParse(FindDate(logParts[0]), out DateTime logTime))
+                        {
+                            _logger.LogInformation("logTime {logTime}", JsonConvert.SerializeObject(logTime, Formatting.Indented));
+                            lastLogTime = logTime;
+                        }
+                    }
                 }
             }
         }
@@ -93,48 +100,25 @@ public class ServerHungDetector : BackgroundService
         }
     }
 
-    private async Task<string> CleanLog(Stream logs)
+    private string FindDate(string data)
     {
-        byte[] buffer = new byte[4096]; // Use a buffer for reading the stream
-        int bytesRead;
+        string text = "Some logs with timestamps: 2024-04-24T16:03:39.222369508Z and 2024-04-24T17:15:42.123456789Z";
 
-        using (MemoryStream memoryStream = new MemoryStream())
+        // Define the regex pattern to find dates in the specified format
+        string pattern = @"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z";
+
+        // Create a Regex object
+        Regex regex = new Regex(pattern);
+
+        // Find all matches in the text
+        MatchCollection matches = regex.Matches(text);
+
+        // Iterate through the matches and print them
+        foreach (Match match in matches)
         {
-            while ((bytesRead = await logs.ReadAsync(buffer, 0, buffer.Length)) > 0)
-            {
-                int offset = 0;
-
-                while (offset < bytesRead)
-                {
-                    // Skip the first 8-byte header
-                    int segmentHeaderLength = 8;
-                    if (bytesRead - offset < segmentHeaderLength)
-                    {
-                        break; // Not enough data for a complete header
-                    }
-
-                    // Read the segment length from the header
-                    int segmentLength = BitConverter.ToInt32(buffer, offset + 4); // Last 4 bytes represent length
-                    
-                    if (offset + segmentHeaderLength + segmentLength > bytesRead)
-                    {
-                        break; // Not enough data for the entire segment
-                    }
-
-                    // Read the actual log content
-                    byte[] segment = new byte[segmentLength];
-                    Array.Copy(buffer, offset + segmentHeaderLength, segment, 0, segmentLength);
-
-                    // Convert to string and process the log data
-                    string logContent = Encoding.UTF8.GetString(segment);
-                    memoryStream.Write(segment, 0, segmentLength); // Store in memory stream
-
-                    offset += segmentHeaderLength + segmentLength; // Move the offset
-                }
-            }
-
-            // Convert the memory stream to a string and process the logs
-            return Encoding.UTF8.GetString(memoryStream.ToArray());
+            return match.Value;
         }
+
+        return string.Empty;
     }
 }

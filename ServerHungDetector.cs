@@ -22,7 +22,7 @@ public class ServerHungDetector : BackgroundService
     public ServerHungDetector(ILogger<ServerHungDetector> logger)
     {
         _logger = logger;
-        _timeout = TimeSpan.FromSeconds(64);
+        _timeout = TimeSpan.FromSeconds(150);
         _dockerClient = new DockerClientConfiguration().CreateClient();
     }
 
@@ -84,7 +84,7 @@ public class ServerHungDetector : BackgroundService
 
                         if (DateTime.TryParse(FindDate(logParts[0]), out DateTime logTime))
                         {
-                            _logger.LogInformation("logTime {logTime}", JsonConvert.SerializeObject(logTime, Formatting.Indented));
+                            // _logger.LogInformation("logTime {logTime}", JsonConvert.SerializeObject(logTime, Formatting.Indented));
                             lastLogTime = logTime;
                         }
                     }
@@ -98,7 +98,7 @@ public class ServerHungDetector : BackgroundService
         if (DateTime.UtcNow - lastLogTime > _timeout)
         {
             _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds, FAKE restarting container: {containerName}");
-            // await _dockerClient.Containers.RestartContainerAsync(container.ID, new ContainerRestartParameters());
+            await _dockerClient.Containers.RestartContainerAsync(container.ID, new ContainerRestartParameters());
         }
     }
 

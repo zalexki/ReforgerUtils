@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   scenario-rotation:
     restart: unless-stopped
@@ -8,9 +6,6 @@ services:
       dockerfile: Dockerfile
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /Users/admin/Site/testFile/config_labsix.json:/config.json
-      - /Users/admin/Site/testFile/listof_scenarios.json:/list_scenarios.json
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      # - SERVER_CONTAINER_NAMES=arma-koth-reforged-1-1,arma-koth-reforged-2-1,arma-koth-reforged-3-1,arma-koth-reforged-4-1,arma-koth-reforged-5-1,arma-koth-reforged-6-1,armareforger-koth-reforged-1-1
-      - SERVER_CONTAINER_NAMES=arma-koth-reforged-1-1,armareforger-koth-reforged-1-1
+      - SERVER_CONTAINER_NAMES=arma-koth-reforged-1-1,arma-koth-reforged-2-1,arma-koth-reforged-3-1,arma-koth-reforged-4-1,arma-koth-reforged-5-1,arma-koth-reforged-6-1,armareforger-koth-reforged-1-1

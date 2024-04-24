@@ -64,7 +64,6 @@ public class ServerHungDetector : BackgroundService
             ShowStderr = true,
             Timestamps = true,
             Follow = false,
-            Since = ((DateTimeOffset)aMinuteAndAHalfAgo).ToUnixTimeSeconds().ToString(),
             Tail = "1"
         };
 
@@ -80,7 +79,7 @@ public class ServerHungDetector : BackgroundService
                     if (logLine.Length > 0)
                     {
                         var logParts = logLine.Split(" ", StringSplitOptions.RemoveEmptyEntries);
-
+                        _logger.LogInformation($"logTime {logParts}");
                         if (DateTime.TryParse(logParts[0], out DateTime logTime))
                         {
                             lastLogTime = logTime;
@@ -96,10 +95,10 @@ public class ServerHungDetector : BackgroundService
             // }
         }
 
-        // if (DateTime.UtcNow - lastLogTime > _timeout)
-        // {
-        //     _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds, restarting container: {containerName}");
-        //     await _dockerClient.Containers.RestartContainerAsync(container.ID, new ContainerRestartParameters());
-        // }
+        if (DateTime.UtcNow - lastLogTime > _timeout)
+        {
+            _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds, restarting container: {containerName}");
+            await _dockerClient.Containers.RestartContainerAsync(container.ID, new ContainerRestartParameters());
+        }
     }
 }

@@ -37,6 +37,7 @@ public class ServerHungDetector : BackgroundService
             {
                 _logger.LogInformation($" Start Check {containerName}");
                 await CheckAndRestartContainer(containerName, stoppingToken);
+                _logger.LogInformation($" End Check {containerName}");
             }
 
             await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
@@ -63,7 +64,7 @@ public class ServerHungDetector : BackgroundService
             ShowStdout = true,
             ShowStderr = true,
             Timestamps = true,
-            Follow = true,
+            Follow = false,
             Tail = "1"
         };
 
@@ -92,7 +93,7 @@ public class ServerHungDetector : BackgroundService
 
         if (DateTime.UtcNow - lastLogTime > _timeout)
         {
-            Console.WriteLine($"No logs for {_timeout.TotalSeconds} seconds, restarting container: {containerName}");
+            _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds, restarting container: {containerName}");
             await _dockerClient.Containers.RestartContainerAsync(container.ID, new ContainerRestartParameters());
         }
     }

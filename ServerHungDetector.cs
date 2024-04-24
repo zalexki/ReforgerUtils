@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -69,29 +70,30 @@ public class ServerHungDetector : BackgroundService
 
         using (var logs = await _dockerClient.Containers.GetContainerLogsAsync(container.ID, logParams))
         {
-            // if (logs != null)
-            // {
-            //     using (StreamReader reader = new StreamReader(logs))
-            //     {
-            //         string logLine = await reader.ReadToEndAsync();
-            //         _logger.LogInformation($"Container {containerName} logLine is {logLine}.");
+            if (logs != null)
+            {
+                using (StreamReader reader = new StreamReader(logs))
+                {
+                    string logLine = await reader.ReadToEndAsync();
+                    _logger.LogInformation($"Container {containerName} logLine is {logLine}.");
 
-            //         if (logLine.Length > 0)
-            //         {
-            //             var logParts = logLine.Split(" ", StringSplitOptions.RemoveEmptyEntries);
+                    if (logLine.Length > 0)
+                    {
+                        var logParts = logLine.Split(" ", StringSplitOptions.RemoveEmptyEntries);
 
-            //             if (DateTime.TryParse(logParts[0], out DateTime logTime))
-            //             {
-            //                 lastLogTime = logTime;
-            //             }
-            //         }
-            //     }
-            // } 
+                        if (DateTime.TryParse(logParts[0], out DateTime logTime))
+                        {
+                            lastLogTime = logTime;
+                            _logger.LogInformation($"logTime {logTime}");
+                        }
+                    }
+                }
+            } 
             
-            if (logs is null) {
-                _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds, restarting container: {containerName}");
-                await _dockerClient.Containers.RestartContainerAsync(container.ID, new ContainerRestartParameters());
-            }
+            // if (logs is null) {
+            //     _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds, restarting container: {containerName}");
+            //     await _dockerClient.Containers.RestartContainerAsync(container.ID, new ContainerRestartParameters());
+            // }
         }
 
         // if (DateTime.UtcNow - lastLogTime > _timeout)

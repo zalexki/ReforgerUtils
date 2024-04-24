@@ -23,7 +23,7 @@ public class ServerHungDetector : BackgroundService
     public ServerHungDetector(ILogger<ServerHungDetector> logger)
     {
         _logger = logger;
-        _timeout = TimeSpan.FromSeconds(65);
+        _timeout = TimeSpan.FromSeconds(64);
         _dockerClient = new DockerClientConfiguration().CreateClient();
     }
 

@@ -13,9 +13,9 @@ using Newtonsoft.Json.Linq;
 
 namespace ReforgerScenarioRotation;
 
-public class Worker : BackgroundService
+public class ScenarioRotationWorker : BackgroundService
 {
-    private readonly ILogger<Worker> _logger;
+    private readonly ILogger<ScenarioRotationWorker> _logger;
     private readonly DockerClient _dockerClient;
     
     private List<string> _previousPicks { get; set; }
@@ -25,7 +25,7 @@ public class Worker : BackgroundService
     
     private readonly string CONTAINER_NAME = Environment.GetEnvironmentVariable("SERVER_CONTAINER_NAME");
 
-    public Worker(ILogger<Worker> logger)
+    public ScenarioRotationWorker(ILogger<ScenarioRotationWorker> logger)
     {
         _logger = logger;
         _dockerClient = new DockerClientConfiguration().CreateClient();

@@ -1,0 +1,6 @@
+services:
+  test_container:
+    image: ghcr.io/acemod/arma-reforger:edge
+    restart: unless-stopped
+    environment:
+      - ARMA_PARAMS=-logStats 30000

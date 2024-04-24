@@ -103,8 +103,6 @@ public class ServerHungDetector : BackgroundService
 
     private string FindDate(string data)
     {
-        string text = "Some logs with timestamps: 2024-04-24T16:03:39.222369508Z and 2024-04-24T17:15:42.123456789Z";
-
         // Define the regex pattern to find dates in the specified format
         string pattern = @"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z";
 
@@ -112,7 +110,7 @@ public class ServerHungDetector : BackgroundService
         Regex regex = new Regex(pattern);
 
         // Find all matches in the text
-        MatchCollection matches = regex.Matches(text);
+        MatchCollection matches = regex.Matches(data);
 
         // Iterate through the matches and print them
         foreach (Match match in matches)

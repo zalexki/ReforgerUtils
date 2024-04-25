@@ -90,10 +90,7 @@ public class ServerHungDetector : BackgroundService
                             if (DateTime.TryParse(FindDate(dateString), out DateTime logTime))
                             {
                                 _logger.LogInformation("logTime {logTime}", logTime);
-                                if (lastLogTime < logTime) 
-                                {
-                                    lastLogTime = logTime;
-                                }
+                                lastLogTime = logTime;
                             }
                         }
                     }

@@ -66,7 +66,7 @@ public class ServerHungDetector : BackgroundService
             ShowStderr = true,
             Timestamps = true,
             Follow = false,
-            Tail = "10"
+            Tail = "1"
         };
 
         var dateNow = DateTime.UtcNow;

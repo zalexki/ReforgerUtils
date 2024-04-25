@@ -69,6 +69,7 @@ public class ServerHungDetector : BackgroundService
             Tail = "10"
         };
 
+        var dateNow = DateTime.UtcNow;
         using (var logs = await _dockerClient.Containers.GetContainerLogsAsync(container.ID, logParams))
         {
             if (logs != null)
@@ -88,7 +89,7 @@ public class ServerHungDetector : BackgroundService
 
                             if (DateTime.TryParse(FindDate(dateString), out DateTime logTime))
                             {
-                                _logger.LogInformation("logTime {logTime}", JsonConvert.SerializeObject(logTime, Formatting.Indented));
+                                _logger.LogInformation("logTime {logTime}", logTime);
                                 if (lastLogTime < logTime) 
                                 {
                                     lastLogTime = logTime;
@@ -100,11 +101,13 @@ public class ServerHungDetector : BackgroundService
             }
         }
 
-        _logger.LogInformation("TimeDiff is {logTime} and timeout is {timeout} for {containerName}", 
-            JsonConvert.SerializeObject(DateTime.UtcNow - lastLogTime, Formatting.Indented),
+        var delta = dateNow - lastLogTime;
+        _logger.LogInformation("TimeDiff is {lastLogTime} and timeout is {timeout} so delta is {delta} for {containerName}", 
+            JsonConvert.SerializeObject(lastLogTime, Formatting.Indented),
             JsonConvert.SerializeObject(_timeout, Formatting.Indented),
+            JsonConvert.SerializeObject(delta , Formatting.Indented),
             containerName);
-        if (DateTime.UtcNow - lastLogTime > _timeout)
+        if (delta > _timeout)
         {
             _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds, restarting container: {containerName}");
             await _dockerClient.Containers.RestartContainerAsync(container.ID, new ContainerRestartParameters());

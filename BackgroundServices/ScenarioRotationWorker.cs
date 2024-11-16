@@ -11,18 +11,18 @@ using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
-namespace ReforgerScenarioRotation;
+namespace ReforgerScenarioRotation.BackgroundServices;
 
 public class ScenarioRotationWorker : BackgroundService
 {
     private readonly ILogger<ScenarioRotationWorker> _logger;
     private readonly DockerClient _dockerClient;
-    
+
     private List<string> _previousPicks { get; set; }
-    
+
     private const string SERVER_CONFIG_FILE_PATH = "/config.json";
     private const string LIST_SCENARIOS_FILE_PATH = "/list_scenarios.json";
-    
+
     private readonly string CONTAINER_NAME = Environment.GetEnvironmentVariable("SERVER_CONTAINER_NAME");
 
     public ScenarioRotationWorker(ILogger<ScenarioRotationWorker> logger)
@@ -52,7 +52,7 @@ public class ScenarioRotationWorker : BackgroundService
             };
             var serverContainer = await _dockerClient.Containers
                 .ListContainersAsync(listParam, cancellationToken: stoppingToken);
-            
+
             if (serverContainer.Any())
             {
                 var container = serverContainer?.ToList().First();
@@ -71,7 +71,7 @@ public class ScenarioRotationWorker : BackgroundService
             {
                 _logger.LogCritical("container with name {ContainerName} not found", CONTAINER_NAME);
             }
-            
+
             await Task.Delay(5000, stoppingToken);
         }
     }
@@ -86,7 +86,7 @@ public class ScenarioRotationWorker : BackgroundService
 
         File.WriteAllText(SERVER_CONFIG_FILE_PATH, JsonConvert.SerializeObject(json, Formatting.Indented));
     }
-    
+
     private string PickRandomScenario()
     {
         var propertyScenarioList = JObject.Parse(File.ReadAllText(LIST_SCENARIOS_FILE_PATH)).Property("scenarioList");
@@ -94,13 +94,13 @@ public class ScenarioRotationWorker : BackgroundService
         {
             throw new Exception("list_scenarios.json is missing scenarioList property");
         }
-            
+
         var list = propertyScenarioList.ToList().Values<string>().ToList();
         if (list.Any())
         {
             return FindNextScenario(list);
         }
-        
+
         throw new Exception("propertyScenarioList is empty");
     }
 
@@ -129,8 +129,8 @@ public class ScenarioRotationWorker : BackgroundService
 
                 return selectedScenario;
             }
-            
-            var latestPick = _previousPicks.Last(); 
+
+            var latestPick = _previousPicks.Last();
             if (latestPick != selectedScenario)
             {
                 _previousPicks.Add(selectedScenario);
@@ -138,10 +138,10 @@ public class ScenarioRotationWorker : BackgroundService
                 {
                     _previousPicks.Remove(_previousPicks.First());
                 }
-                
+
                 return selectedScenario;
             }
-            
+
             _logger.LogInformation("scenario not valid {SelectedScenario}", selectedScenario);
         }
     }

@@ -11,11 +11,13 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
+namespace ReforgerScenarioRotation.BackgroundServices;
+
 public class ServerHungDetector : BackgroundService
 {
     private readonly ILogger<ServerHungDetector> _logger;
     private readonly DockerClient _dockerClient;
-    
+
     private List<string> _containerNames;
     private readonly TimeSpan _timeout;
 
@@ -99,10 +101,10 @@ public class ServerHungDetector : BackgroundService
         }
 
         var delta = dateNow - lastLogTime;
-        _logger.LogInformation("TimeDiff is {lastLogTime} and timeout is {timeout} so delta is {delta} for {containerName}", 
+        _logger.LogInformation("TimeDiff is {lastLogTime} and timeout is {timeout} so delta is {delta} for {containerName}",
             JsonConvert.SerializeObject(lastLogTime, Formatting.Indented),
             JsonConvert.SerializeObject(_timeout, Formatting.Indented),
-            JsonConvert.SerializeObject(delta , Formatting.Indented),
+            JsonConvert.SerializeObject(delta, Formatting.Indented),
             containerName);
         if (delta > _timeout)
         {

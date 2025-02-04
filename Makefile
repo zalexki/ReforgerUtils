@@ -1,11 +1,11 @@
 help:
 	@egrep "^#" Makefile
 
-# target: up                        - Start rabbit in docker container
+# target: up                        - Start Arma HungDetector docker container
 up:
 	docker compose up -d
 
-# target: up                        - Start rabbit in docker container
+# target: build                     - Build Arma HungDetector docker container
 build:
 	docker compose up -d --build
 

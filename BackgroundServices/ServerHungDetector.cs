@@ -24,7 +24,7 @@ public class ServerHungDetector : BackgroundService
     public ServerHungDetector(ILogger<ServerHungDetector> logger)
     {
         _logger = logger;
-        _timeout = TimeSpan.FromSeconds(300);
+        _timeout = TimeSpan.FromSeconds(360);
         _dockerClient = new DockerClientConfiguration().CreateClient();
     }
 
@@ -72,6 +72,8 @@ public class ServerHungDetector : BackgroundService
         };
 
         var dateNow = DateTime.UtcNow;
+        
+        var applicationHang = false;
         using (var logs = await _dockerClient.Containers.GetContainerLogsAsync(container.ID, logParams))
         {
             if (logs != null)
@@ -82,6 +84,10 @@ public class ServerHungDetector : BackgroundService
 
                     if (logLine.Length > 0)
                     {
+                        if (logLine.Contains("Application hangs"))
+                        {
+                            applicationHang = true;
+                        }
                         var logParts = logLine.Split(" ", StringSplitOptions.RemoveEmptyEntries);
                         // _logger.LogInformation("logParts {logParts}", JsonConvert.SerializeObject(logParts, Formatting.Indented));
                         foreach (var item in logParts)
@@ -106,7 +112,7 @@ public class ServerHungDetector : BackgroundService
             JsonConvert.SerializeObject(_timeout, Formatting.Indented),
             JsonConvert.SerializeObject(delta, Formatting.Indented),
             containerName);
-        if (delta > _timeout)
+        if (delta > _timeout || applicationHang)
         {
             _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds, restarting container: {containerName}");
             await _dockerClient.Containers.RestartContainerAsync(container.ID, new ContainerRestartParameters());

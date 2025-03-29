@@ -84,7 +84,7 @@ public class ServerHungDetector : BackgroundService
 
                     if (logLine.Length > 0)
                     {
-                        if (logLine.Contains("Application hangs"))
+                        if (logLine.Contains("Application hangs") || logLine.Contains("IReplication::JIPError: Terminating connection"))
                         {
                             applicationHang = true;
                         }

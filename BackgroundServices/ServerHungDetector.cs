@@ -84,16 +84,6 @@ public class ServerHungDetector : BackgroundService
 
                     if (logLine.Length > 0)
                     {
-                        if (logLine.Contains("IReplication::JIPError: Terminating connection"))
-                        {
-                            _logger.LogInformation("JIP Error found gonna restart");
-                            applicationHang = true;
-                        }
-                        if (logLine.Contains("Application hangs"))
-                        {
-                            _logger.LogInformation("Application hangs found gonna restart");
-                            applicationHang = true;
-                        }
                         var logParts = logLine.Split(" ", StringSplitOptions.RemoveEmptyEntries);
                         // _logger.LogInformation("logParts {logParts}", JsonConvert.SerializeObject(logParts, Formatting.Indented));
                         foreach (var item in logParts)
@@ -111,6 +101,40 @@ public class ServerHungDetector : BackgroundService
                 }
             }
         }
+
+        var logParamsMoreLines = new ContainerLogsParameters
+        {
+            ShowStdout = true,
+            ShowStderr = true,
+            Timestamps = true,
+            Follow = false,
+            Tail = "10"
+        };
+        using (var logs = await _dockerClient.Containers.GetContainerLogsAsync(container.ID, logParamsMoreLines))
+        {
+            if (logs != null)
+            {
+                using (StreamReader reader = new StreamReader(logs))
+                {
+                    string logLines = await reader.ReadToEndAsync();
+
+                    if (logLines.Length > 0)
+                    {
+                        if (logLines.Contains("IReplication::JIPError: Terminating connection"))
+                        {
+                            _logger.LogInformation("JIP Error found gonna restart");
+                            applicationHang = true;
+                        }
+                        if (logLines.Contains("Application hangs"))
+                        {
+                            _logger.LogInformation("Application hangs found gonna restart");
+                            applicationHang = true;
+                        }
+                    }
+                }
+            }
+        }
+
 
         var delta = dateNow - lastLogTime;
         _logger.LogInformation("TimeDiff is {lastLogTime} and timeout is {timeout} so delta is {delta} for {containerName}",

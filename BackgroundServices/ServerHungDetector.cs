@@ -84,8 +84,14 @@ public class ServerHungDetector : BackgroundService
 
                     if (logLine.Length > 0)
                     {
-                        if (logLine.Contains("Application hangs") || logLine.Contains("IReplication::JIPError: Terminating connection"))
+                        if (logLine.Contains("IReplication::JIPError: Terminating connection"))
                         {
+                            _logger.LogInformation("JIP Error found gonna restart");
+                            applicationHang = true;
+                        }
+                        if (logLine.Contains("Application hangs"))
+                        {
+                            _logger.LogInformation("Application hangs found gonna restart");
                             applicationHang = true;
                         }
                         var logParts = logLine.Split(" ", StringSplitOptions.RemoveEmptyEntries);
@@ -114,7 +120,7 @@ public class ServerHungDetector : BackgroundService
             containerName);
         if (delta > _timeout || applicationHang)
         {
-            _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds, restarting container: {containerName}");
+            _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds or app hung, restarting container: {containerName}");
             await _dockerClient.Containers.RestartContainerAsync(container.ID, new ContainerRestartParameters());
         }
     }

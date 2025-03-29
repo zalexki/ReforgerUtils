@@ -120,11 +120,6 @@ public class ServerHungDetector : BackgroundService
 
                     if (logLines.Length > 0)
                     {
-                        if (logLines.Contains("IReplication::JIPError: Terminating connection"))
-                        {
-                            _logger.LogInformation("JIP Error found gonna restart");
-                            applicationHang = true;
-                        }
                         if (logLines.Contains("Application hangs"))
                         {
                             _logger.LogInformation("Application hangs found gonna restart");

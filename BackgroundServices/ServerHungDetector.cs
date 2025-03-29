@@ -74,28 +74,26 @@ public class ServerHungDetector : BackgroundService
         var dateNow = DateTime.UtcNow;
         
         var applicationHang = false;
-        using (var logs = await _dockerClient.Containers.GetContainerLogsAsync(container.ID, logParams))
+        using (var logs = await _dockerClient.Containers.GetContainerLogsAsync(container.ID, false, logParams, stoppingToken))
         {
             if (logs != null)
             {
-                using (StreamReader reader = new StreamReader(logs))
+                var (stdout, stderr) = await logs.ReadOutputToEndAsync(stoppingToken);
+                string logLine = stdout; // Use stdout or stderr as needed
+
+                if (logLine.Length > 0)
                 {
-                    string logLine = await reader.ReadToEndAsync();
-
-                    if (logLine.Length > 0)
+                    var logParts = logLine.Split(" ", StringSplitOptions.RemoveEmptyEntries);
+                    // _logger.LogInformation("logParts {logParts}", JsonConvert.SerializeObject(logParts, Formatting.Indented));
+                    foreach (var item in logParts)
                     {
-                        var logParts = logLine.Split(" ", StringSplitOptions.RemoveEmptyEntries);
-                        // _logger.LogInformation("logParts {logParts}", JsonConvert.SerializeObject(logParts, Formatting.Indented));
-                        foreach (var item in logParts)
-                        {
-                            // _logger.LogInformation("item {item}", JsonConvert.SerializeObject(item, Formatting.Indented));
-                            var dateString = FindDate(item);
+                        // _logger.LogInformation("item {item}", JsonConvert.SerializeObject(item, Formatting.Indented));
+                        var dateString = FindDate(item);
 
-                            if (DateTime.TryParse(FindDate(dateString), out DateTime logTime))
-                            {
-                                _logger.LogInformation("logTime {logTime}", logTime);
-                                lastLogTime = logTime;
-                            }
+                        if (DateTime.TryParse(FindDate(dateString), out DateTime logTime))
+                        {
+                            _logger.LogInformation("logTime {logTime}", logTime);
+                            lastLogTime = logTime;
                         }
                     }
                 }
@@ -110,21 +108,20 @@ public class ServerHungDetector : BackgroundService
             Follow = false,
             Tail = "10"
         };
-        using (var logs = await _dockerClient.Containers.GetContainerLogsAsync(container.ID, logParamsMoreLines))
+
+        using (var logs = await _dockerClient.Containers.GetContainerLogsAsync(container.ID, false, logParamsMoreLines))
         {
             if (logs != null)
             {
-                using (StreamReader reader = new StreamReader(logs))
-                {
-                    string logLines = await reader.ReadToEndAsync();
+                var (stdout, stderr) = await logs.ReadOutputToEndAsync(stoppingToken);
+                string logLines = stdout; // Use stdout or stderr as needed
 
-                    if (logLines.Length > 0)
+                if (logLines.Length > 0)
+                {
+                    if (logLines.Contains("Application hangs"))
                     {
-                        if (logLines.Contains("Application hangs"))
-                        {
-                            _logger.LogInformation("Application hangs found gonna restart");
-                            applicationHang = true;
-                        }
+                        _logger.LogWarning("Application hangs found gonna restart");
+                        applicationHang = true;
                     }
                 }
             }

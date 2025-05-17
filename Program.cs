@@ -5,7 +5,7 @@ using ReforgerScenarioRotation.BackgroundServices;
 IHost host = Host.CreateDefaultBuilder(args)
     .ConfigureServices(services =>
     {
-        services.AddHostedService<ScenarioRotationWorker>();
+        services.AddHostedService<MultiServerScenarioRotationWorker>();
     })
     .Build();
 

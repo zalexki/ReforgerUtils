@@ -100,8 +100,8 @@ public class MultiServerScenarioRotationWorker : BackgroundService
 
     private void RandomizeScenario(string containerName)
     {
-        // Extract server index from container name (assuming format like arma-server-1)
-        string serverIndex = containerName.Split('-').LastOrDefault() ?? "1";
+        // Extract server index from container name patterns like arma3-koth-reforged-3-1
+        string serverIndex = GetServerIndex(containerName);
         
         string configFilePath = string.Format(SERVER_CONFIG_FILE_PATH_TEMPLATE, serverIndex);
         string configText = File.ReadAllText(configFilePath);
@@ -112,6 +112,22 @@ public class MultiServerScenarioRotationWorker : BackgroundService
         _logger.LogInformation("Server {ServerName}: scenario selected {SelectedScenario}", containerName, scenarioId);
 
         File.WriteAllText(configFilePath, JsonConvert.SerializeObject(json, Formatting.Indented));
+    }
+    
+    private string GetServerIndex(string containerName)
+    {
+        // Handle patterns like arma3-koth-reforged-3-1, koth3-koth-reforged-3-1
+        if (containerName.Contains("reforged"))
+        {
+            var parts = containerName.Split('-');
+            if (parts.Length >= 3)
+            {
+                // Get the number after "reforged-"
+                return parts[parts.Length - 2];
+            }
+        }
+        
+        return "1"; // Default fallback
     }
 
     private string PickRandomScenario(string containerName, string serverIndex)

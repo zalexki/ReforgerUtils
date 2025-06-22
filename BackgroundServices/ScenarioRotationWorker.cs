@@ -181,7 +181,7 @@ public class MultiServerScenarioRotationWorker : BackgroundService
         }
 
         // Select random scenario from eligible options
-        var random = new Random();
+        var random = new Random(System.DateTime.Now.Millisecond); 
         var selectedScenario = eligibleScenarios[random.Next(eligibleScenarios.Count)];
         
         // Update history

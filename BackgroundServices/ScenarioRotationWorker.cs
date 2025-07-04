@@ -18,16 +18,13 @@ public class MultiServerScenarioRotationWorker : BackgroundService
 {
     private readonly ILogger<MultiServerScenarioRotationWorker> _logger;
     private readonly DockerClient _dockerClient;
-    
+
     // Dictionary to store scenario history for each server
     private readonly ConcurrentDictionary<string, List<string>> _serverScenarioHistory;
-    
-    // Configure how many previous scenarios to avoid repeating
-    private const int SCENARIO_HISTORY_SIZE = 4;
 
     private const string SERVER_CONFIG_FILE_PATH_TEMPLATE = "/server{0}/config.json";
     private const string LIST_SCENARIOS_FILE_PATH_TEMPLATE = "/server{0}/list_scenarios.json";
-    
+
     // List of container names for all servers
     private readonly List<string> _serverContainerNames;
 
@@ -36,11 +33,11 @@ public class MultiServerScenarioRotationWorker : BackgroundService
         _logger = logger;
         _dockerClient = new DockerClientConfiguration().CreateClient();
         _serverScenarioHistory = new ConcurrentDictionary<string, List<string>>();
-        
+
         // Get container names from environment variables
         string serverNamesEnv = Environment.GetEnvironmentVariable("SERVER_CONTAINER_NAMES") ?? "arma-server-1,arma-server-2,arma-server-3";
         _serverContainerNames = serverNamesEnv.Split(',').Select(s => s.Trim()).ToList();
-        
+
         // Initialize history for each server
         foreach (var containerName in _serverContainerNames)
         {
@@ -53,9 +50,9 @@ public class MultiServerScenarioRotationWorker : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             // Process each server in parallel
-            var tasks = _serverContainerNames.Select(containerName => 
+            var tasks = _serverContainerNames.Select(containerName =>
                 ProcessServerContainerAsync(containerName, stoppingToken));
-            
+
             await Task.WhenAll(tasks);
             await Task.Delay(5000, stoppingToken);
         }
@@ -77,7 +74,7 @@ public class MultiServerScenarioRotationWorker : BackgroundService
                 }
             }
         };
-        
+
         var serverContainer = await _dockerClient.Containers
             .ListContainersAsync(listParam, cancellationToken: stoppingToken);
 
@@ -102,7 +99,7 @@ public class MultiServerScenarioRotationWorker : BackgroundService
     {
         // Extract server index from container name patterns like arma3-koth-reforged-3-1
         string serverIndex = GetServerIndex(containerName);
-        
+
         string configFilePath = string.Format(SERVER_CONFIG_FILE_PATH_TEMPLATE, serverIndex);
         string configText = File.ReadAllText(configFilePath);
         var json = JObject.Parse(configText);
@@ -113,7 +110,7 @@ public class MultiServerScenarioRotationWorker : BackgroundService
 
         File.WriteAllText(configFilePath, JsonConvert.SerializeObject(json, Formatting.Indented));
     }
-    
+
     private string GetServerIndex(string containerName)
     {
         // Handle patterns like arma3-koth-reforged-3-1, koth3-koth-reforged-3-1
@@ -126,7 +123,7 @@ public class MultiServerScenarioRotationWorker : BackgroundService
                 return parts[parts.Length - 2];
             }
         }
-        
+
         return "1"; // Default fallback
     }
 
@@ -134,7 +131,7 @@ public class MultiServerScenarioRotationWorker : BackgroundService
     {
         string scenariosFilePath = string.Format(LIST_SCENARIOS_FILE_PATH_TEMPLATE, serverIndex);
         var propertyScenarioList = JObject.Parse(File.ReadAllText(scenariosFilePath)).Property("scenarioList");
-        
+
         if (propertyScenarioList is null)
         {
             throw new Exception($"list_scenarios.json for server {containerName} is missing scenarioList property");
@@ -151,12 +148,15 @@ public class MultiServerScenarioRotationWorker : BackgroundService
 
     private string FindNextScenario(string containerName, List<string> allScenarios)
     {
+        // Dynamically compute history size: total scenarios - 2 (minimum 1)
+        int scenarioHistorySize = Math.Max(1, allScenarios.Count - 2);
+
         var serverHistory = _serverScenarioHistory[containerName];
-        
-        if (allScenarios.Count <= SCENARIO_HISTORY_SIZE)
+
+        if (allScenarios.Count <= scenarioHistorySize)
         {
-            _logger.LogWarning("Server {ServerName}: Total scenario count ({Count}) is less than or equal to history size ({HistorySize}). " +
-                              "Some scenarios will repeat more frequently.", containerName, allScenarios.Count, SCENARIO_HISTORY_SIZE);
+            _logger.LogWarning("Server {ServerName}: Total scenario count ({Count}) is less than or equal to computed history size ({HistorySize}). " +
+                              "Some scenarios will repeat more frequently.", containerName, allScenarios.Count, scenarioHistorySize);
         }
 
         // Create a list of eligible scenarios (those not in recent history)
@@ -170,8 +170,8 @@ public class MultiServerScenarioRotationWorker : BackgroundService
             eligibleScenarios = allScenarios
                 .Where(scenario => scenario != serverHistory.LastOrDefault())
                 .ToList();
-            
-            _logger.LogInformation("Server {ServerName}: All scenarios have been used recently. Selecting from full list except last used.", 
+
+            _logger.LogInformation("Server {ServerName}: All scenarios have been used recently. Selecting from full list except last used.",
                 containerName);
         }
 
@@ -181,22 +181,21 @@ public class MultiServerScenarioRotationWorker : BackgroundService
         }
 
         // Select random scenario from eligible options
-        var random = new Random(System.DateTime.Now.Millisecond); 
+        var random = new Random(System.DateTime.Now.Millisecond);
         var selectedScenario = eligibleScenarios[random.Next(eligibleScenarios.Count)];
-        
+
         // Update history
         serverHistory.Add(selectedScenario);
-        
+
         // Maintain history size
-        while (serverHistory.Count > SCENARIO_HISTORY_SIZE)
+        while (serverHistory.Count > scenarioHistorySize)
         {
             serverHistory.RemoveAt(0);
         }
 
-        // Update the dictionary (not strictly necessary with Lists, but good practice for clarity)
         _serverScenarioHistory[containerName] = serverHistory;
 
-        _logger.LogInformation("Server {ServerName}: Selected scenario {SelectedScenario}. History: [{History}]", 
+        _logger.LogInformation("Server {ServerName}: Selected scenario {SelectedScenario}. History: [{History}]",
             containerName, selectedScenario, string.Join(", ", serverHistory));
 
         return selectedScenario;

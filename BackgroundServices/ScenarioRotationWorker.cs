@@ -41,7 +41,7 @@ public class MultiServerScenarioRotationWorker : BackgroundService
         // Initialize history for each server
         foreach (var containerName in _serverContainerNames)
         {
-            _serverScenarioHistory[containerName] = new List<string>(SCENARIO_HISTORY_SIZE);
+            _serverScenarioHistory[containerName] = new List<string>();
         }
     }
 

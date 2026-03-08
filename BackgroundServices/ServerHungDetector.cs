@@ -1,15 +1,15 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
+using System.Net.Http;
+using System.Net.Http.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Docker.DotNet;
 using Docker.DotNet.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
 
 namespace ReforgerScenarioRotation.BackgroundServices;
 
@@ -17,147 +17,96 @@ public class ServerHungDetector : BackgroundService
 {
     private readonly ILogger<ServerHungDetector> _logger;
     private readonly DockerClient _dockerClient;
-
-    private List<string> _containerNames;
-    private readonly TimeSpan _timeout;
-
+    private readonly TimeSpan _timeout = TimeSpan.FromMinutes(6);
+    private readonly ConcurrentDictionary<string, DateTime> _lastAlertTime = new();
+    private readonly TimeSpan _alertInterval = TimeSpan.FromMinutes(10);
+    private readonly HashSet<string> _flaggedAsHung = new(); // Tracks if a server is currently in a "hung" state
+    
     public ServerHungDetector(ILogger<ServerHungDetector> logger)
     {
         _logger = logger;
-        _timeout = TimeSpan.FromSeconds(360);
         _dockerClient = new DockerClientConfiguration().CreateClient();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var names = Environment.GetEnvironmentVariable("SERVER_CONTAINER_NAMES") ?? throw new Exception("missing SERVER_CONTAINER_NAMES env");
-        _containerNames = names.Split(',').ToList();
-        // _containerNames = "reforgerscenariorotation-test_container-1,other_container".Split(',').ToList();
+        string envNames = Environment.GetEnvironmentVariable("SERVER_CONTAINER_NAMES") 
+            ?? throw new Exception("SERVER_CONTAINER_NAMES env is missing");
+        
+        var containerNames = envNames.Split(',').Select(s => s.Trim()).ToList();
 
-        while (true)
+        while (!stoppingToken.IsCancellationRequested)
         {
-            foreach (var containerName in _containerNames)
+            foreach (var name in containerNames)
             {
-                _logger.LogInformation($" Start Check {containerName}");
-                await CheckAndRestartContainer(containerName, stoppingToken);
-                _logger.LogInformation($" End Check {containerName}");
+                await InspectContainerLogs(name, stoppingToken);
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
         }
     }
 
-    private async Task CheckAndRestartContainer(string containerName, CancellationToken stoppingToken)
+    private async Task InspectContainerLogs(string containerName, CancellationToken ct)
     {
-        var container = (await _dockerClient.Containers.ListContainersAsync(new ContainersListParameters
-        {
-            All = true
-        })).FirstOrDefault(c => c.Names.Any(name => name.Contains(containerName)));
+        var containers = await _dockerClient.Containers.ListContainersAsync(
+            new ContainersListParameters { All = true }, ct);
 
-        if (container == null)
-        {
-            _logger.LogInformation($"Container {containerName} not found.");
-            return;
-        }
+        var target = containers.FirstOrDefault(c => c.Names.Any(n => n.Contains(containerName)));
 
-        DateTime lastLogTime = DateTime.UtcNow;
+        if (target == null || target.State != "running") return;
 
         var logParams = new ContainerLogsParameters
         {
             ShowStdout = true,
             ShowStderr = true,
             Timestamps = true,
-            Follow = false,
             Tail = "1"
         };
 
-        var dateNow = DateTime.UtcNow;
-        
-        var applicationHang = false;
-        using (var logs = await _dockerClient.Containers.GetContainerLogsAsync(container.ID, false, logParams, stoppingToken))
+        using var response = await _dockerClient.Containers.GetContainerLogsAsync(target.ID, false, logParams, ct);
+        var (stdout, _) = await response.ReadOutputToEndAsync(ct);
+
+        if (string.IsNullOrWhiteSpace(stdout) || stdout.Length < 38) return;
+
+        string timestampPart = stdout.Substring(8, 30);
+
+        if (DateTime.TryParse(timestampPart, out DateTime lastLogTime))
         {
-            if (logs != null)
+            var silenceDuration = DateTime.UtcNow - lastLogTime.ToUniversalTime();
+
+            if (silenceDuration > _timeout)
             {
-                var (stdout, stderr) = await logs.ReadOutputToEndAsync(stoppingToken);
-                string logLine = stdout; // Use stdout or stderr as needed
-
-                if (logLine.Length > 0)
+                // Check if we've sent an alert recently for this specific container
+                if (_lastAlertTime.TryGetValue(containerName, out DateTime lastSent) &&
+                    DateTime.UtcNow - lastSent < _alertInterval)
                 {
-                    var logParts = logLine.Split(" ", StringSplitOptions.RemoveEmptyEntries);
-                    // _logger.LogInformation("logParts {logParts}", JsonConvert.SerializeObject(logParts, Formatting.Indented));
-                    foreach (var item in logParts)
-                    {
-                        // _logger.LogInformation("item {item}", JsonConvert.SerializeObject(item, Formatting.Indented));
-                        var dateString = FindDate(item);
-
-                        if (DateTime.TryParse(FindDate(dateString), out DateTime logTime))
-                        {
-                            _logger.LogInformation("logTime {logTime}", logTime);
-                            lastLogTime = logTime;
-                        }
-                    }
+                    return; // Exit to avoid spamming
                 }
+
+                _logger.LogWarning("Container {Name} silent for {Secs}s. Sending Discord alert.", containerName,
+                    silenceDuration.TotalSeconds);
+
+                await SendDiscordAlert(containerName, silenceDuration.TotalMinutes);
+
+                // Update the last alert time
+                _lastAlertTime[containerName] = DateTime.UtcNow;
             }
-        }
-
-        var logParamsMoreLines = new ContainerLogsParameters
-        {
-            ShowStdout = true,
-            ShowStderr = true,
-            Timestamps = true,
-            Follow = false,
-            Tail = "10"
-        };
-
-        using (var logs = await _dockerClient.Containers.GetContainerLogsAsync(container.ID, false, logParamsMoreLines))
-        {
-            if (logs != null)
+            else
             {
-                var (stdout, stderr) = await logs.ReadOutputToEndAsync(stoppingToken);
-                string logLines = stdout; // Use stdout or stderr as needed
-
-                if (logLines.Length > 0)
-                {
-                    if (logLines.Contains("Application hangs"))
-                    {
-                        _logger.LogWarning("Application hangs found gonna restart");
-                        applicationHang = true;
-                    }
-                }
+                // Reset if the server starts logging again
+                _lastAlertTime.TryRemove(containerName, out _);
             }
-        }
-
-
-        var delta = dateNow - lastLogTime;
-        _logger.LogInformation("TimeDiff is {lastLogTime} and timeout is {timeout} so delta is {delta} for {containerName}",
-            JsonConvert.SerializeObject(lastLogTime, Formatting.Indented),
-            JsonConvert.SerializeObject(_timeout, Formatting.Indented),
-            JsonConvert.SerializeObject(delta, Formatting.Indented),
-            containerName);
-        if (delta > _timeout || applicationHang)
-        {
-            _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds or app hung, restarting container: {containerName}");
-            await _dockerClient.Containers.RestartContainerAsync(container.ID, new ContainerRestartParameters());
         }
     }
 
-    private string FindDate(string data)
+    private async Task SendDiscordAlert(string serverName, double minutes)
     {
-        // Define the regex pattern to find dates in the specified format
-        string pattern = @"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z";
+        using var client = new HttpClient();
+        var webhookUrl = Environment.GetEnvironmentVariable("DISCORD_WEBHOOK_URL");
+    
+        if (string.IsNullOrEmpty(webhookUrl)) return;
 
-        // Create a Regex object
-        Regex regex = new Regex(pattern);
-
-        // Find all matches in the text
-        MatchCollection matches = regex.Matches(data);
-
-        // Iterate through the matches and print them
-        foreach (Match match in matches)
-        {
-            return match.Value;
-        }
-
-        return string.Empty;
+        var content = new { content = $"@here ⚠️ **Server Hung Alert**: `{serverName}` has had no log output for {minutes:F1} minutes." };
+        await client.PostAsJsonAsync(webhookUrl, content);
     }
 }

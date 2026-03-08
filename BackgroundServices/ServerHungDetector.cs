@@ -30,8 +30,8 @@ public class ServerHungDetector : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        string envNames = Environment.GetEnvironmentVariable("SERVER_CONTAINER_NAMES") 
-            ?? throw new Exception("SERVER_CONTAINER_NAMES env is missing");
+        var envNames = Environment.GetEnvironmentVariable("SERVER_CONTAINER_NAMES") 
+                       ?? throw new Exception("SERVER_CONTAINER_NAMES env is missing");
         
         var containerNames = envNames.Split(',').Select(s => s.Trim()).ToList();
 
@@ -53,7 +53,7 @@ public class ServerHungDetector : BackgroundService
 
         var target = containers.FirstOrDefault(c => c.Names.Any(n => n.Contains(containerName)));
 
-        if (target == null || target.State != "running") return;
+        if (target is not { State: "running" }) return;
 
         var logParams = new ContainerLogsParameters
         {
@@ -68,7 +68,7 @@ public class ServerHungDetector : BackgroundService
 
         if (string.IsNullOrWhiteSpace(stdout) || stdout.Length < 38) return;
 
-        string timestampPart = stdout.Substring(8, 30);
+        var timestampPart = stdout.Substring(8, 30); 
 
         if (DateTime.TryParse(timestampPart, out DateTime lastLogTime))
         {
@@ -76,37 +76,36 @@ public class ServerHungDetector : BackgroundService
 
             if (silenceDuration > _timeout)
             {
-                // Check if we've sent an alert recently for this specific container
-                if (_lastAlertTime.TryGetValue(containerName, out DateTime lastSent) &&
+                _flaggedAsHung.Add(containerName); // Mark as currently hung
+
+                if (_lastAlertTime.TryGetValue(containerName, out DateTime lastSent) && 
                     DateTime.UtcNow - lastSent < _alertInterval)
                 {
-                    return; // Exit to avoid spamming
+                    return; 
                 }
 
-                _logger.LogWarning("Container {Name} silent for {Secs}s. Sending Discord alert.", containerName,
-                    silenceDuration.TotalSeconds);
-
-                await SendDiscordAlert(containerName, silenceDuration.TotalMinutes);
-
-                // Update the last alert time
+                await SendDiscordAlert(containerName, $"@here ⚠️ **Server Hung**: `{containerName}` silent for {silenceDuration.TotalMinutes:F1}m.");
                 _lastAlertTime[containerName] = DateTime.UtcNow;
             }
-            else
+            else if (_flaggedAsHung.Contains(containerName))
             {
-                // Reset if the server starts logging again
+                // Server was hung, but now logs are flowing again
+                await SendDiscordAlert(containerName, $"✅ **Server Recovered**: `{containerName}` is logging again.");
+                
+                _flaggedAsHung.Remove(containerName);
                 _lastAlertTime.TryRemove(containerName, out _);
             }
         }
     }
 
-    private async Task SendDiscordAlert(string serverName, double minutes)
+    private async Task SendDiscordAlert(string serverName, string message)
     {
         using var client = new HttpClient();
         var webhookUrl = Environment.GetEnvironmentVariable("DISCORD_WEBHOOK_URL");
-    
+        
         if (string.IsNullOrEmpty(webhookUrl)) return;
 
-        var content = new { content = $"@here ⚠️ **Server Hung Alert**: `{serverName}` has had no log output for {minutes:F1} minutes." };
+        var content = new { content = message };
         await client.PostAsJsonAsync(webhookUrl, content);
     }
 }

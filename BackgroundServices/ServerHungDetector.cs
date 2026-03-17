@@ -39,6 +39,7 @@ public class ServerHungDetector : BackgroundService
         {
             foreach (var name in containerNames)
             {
+                _logger.LogInformation($"Inspecting logs for container: {name}");
                 await InspectContainerLogs(name, stoppingToken);
             }
 
@@ -77,11 +78,12 @@ public class ServerHungDetector : BackgroundService
             if (silenceDuration > _timeout)
             {
                 _flaggedAsHung.Add(containerName); // Mark as currently hung
+                _logger.LogWarning($"Container `{containerName}` has been silent for {silenceDuration.TotalMinutes:F1} minutes.");
 
                 if (_lastAlertTime.TryGetValue(containerName, out DateTime lastSent) && 
                     DateTime.UtcNow - lastSent < _alertInterval)
                 {
-                    return; 
+                    return;
                 }
 
                 await SendDiscordAlert(containerName, $"@here ⚠️ **Server Hung**: `{containerName}` silent for {silenceDuration.TotalMinutes:F1}m.");

@@ -67,7 +67,10 @@ public class ServerHungDetector : BackgroundService
         using var response = await _dockerClient.Containers.GetContainerLogsAsync(target.ID, false, logParams, ct);
         var (stdout, _) = await response.ReadOutputToEndAsync(ct);
 
-        if (string.IsNullOrWhiteSpace(stdout) || stdout.Length < 38) return;
+        if (string.IsNullOrWhiteSpace(stdout) || stdout.Length < 38) {
+            _logger.LogWarning($"Container `{containerName}` IsNullOrWhiteSpace");
+            return;
+        }
 
         var timestampPart = stdout.Substring(8, 30); 
 

@@ -32,15 +32,21 @@ public class ServerHungDetector : BackgroundService
     {
         var envNames = Environment.GetEnvironmentVariable("SERVER_CONTAINER_NAMES") 
                        ?? throw new Exception("SERVER_CONTAINER_NAMES env is missing");
-        
+    
         var containerNames = envNames.Split(',').Select(s => s.Trim()).ToList();
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            foreach (var name in containerNames)
+            try
             {
-                _logger.LogInformation($"Inspecting logs for container: {name}");
-                await InspectContainerLogs(name, stoppingToken);
+                foreach (var name in containerNames)
+                {
+                    await InspectContainerLogs(name, stoppingToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in ServerHungDetector loop");
             }
 
             await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);

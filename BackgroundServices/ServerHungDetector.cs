@@ -75,7 +75,7 @@ public class ServerHungDetector : BackgroundService
         };
 
         using var response = await _dockerClient.Containers.GetContainerLogsAsync(target.ID, false, logParams, ct);
-        var (stdout, _) = await response.ReadOutputToEndAsync(ct);
+        var (stdout, stderr) = await response.ReadOutputToEndAsync(ct);
 
         if (string.IsNullOrWhiteSpace(stdout))
         {

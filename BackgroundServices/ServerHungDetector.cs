@@ -17,7 +17,7 @@ public class ServerHungDetector : BackgroundService
 {
     private readonly ILogger<ServerHungDetector> _logger;
     private readonly DockerClient _dockerClient;
-    private readonly TimeSpan _timeout = TimeSpan.FromMinutes(6);
+    private readonly TimeSpan _timeout = TimeSpan.FromMinutes(3);
     private readonly ConcurrentDictionary<string, DateTime> _lastAlertTime = new();
     private readonly TimeSpan _alertInterval = TimeSpan.FromMinutes(10);
     private readonly HashSet<string> _flaggedAsHung = new(); // Tracks if a server is currently in a "hung" state

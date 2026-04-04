@@ -77,25 +77,21 @@ public class ServerHungDetector : BackgroundService
         using var response = await _dockerClient.Containers.GetContainerLogsAsync(target.ID, false, logParams, ct);
         var (stdout, _) = await response.ReadOutputToEndAsync(ct);
 
-        // Strip the 8-byte Docker multiplexed stream header
-        if (stdout.Length <= 8)
+        if (string.IsNullOrWhiteSpace(stdout))
         {
             _logger.LogDebug("Container {Name}: no log output yet", containerName);
             return;
         }
 
-        var rawLog = stdout.Substring(8);
-
-        // Find the space separating timestamp from log content
-        var spaceIndex = rawLog.IndexOf(' ');
+        // ReadOutputToEndAsync already strips Docker's binary header — no offset needed
+        var spaceIndex = stdout.IndexOf(' ');
         if (spaceIndex < 0)
         {
-            _logger.LogWarning("Container {Name}: could not find timestamp separator in log line: '{Raw}'",
-                containerName, rawLog);
+            _logger.LogWarning("Container {Name}: could not find timestamp separator: '{Raw}'", containerName, stdout);
             return;
         }
 
-        var timestampPart = rawLog.Substring(0, spaceIndex);
+        var timestampPart = stdout.Substring(0, spaceIndex);
         _logger.LogDebug("Container {Name}: last log timestamp = '{Timestamp}'", containerName, timestampPart);
 
         if (DateTime.TryParse(timestampPart, null, System.Globalization.DateTimeStyles.RoundtripKind,

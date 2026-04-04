@@ -22,7 +22,7 @@ public class ServerHungDetector : BackgroundService
     private readonly TimeSpan _alertInterval = TimeSpan.FromMinutes(10);
     private readonly HashSet<string> _flaggedAsHung = new(); // Tracks if a server is currently in a "hung" state
     private readonly ConcurrentDictionary<string, DateTime> _serverStartTime = new();
-    private readonly HashSet<string> _sixHourAlertSent = new();
+    private readonly HashSet<string> _twelveHourAlertSent = new();
 
     public ServerHungDetector(ILogger<ServerHungDetector> logger)
     {
@@ -96,7 +96,7 @@ public class ServerHungDetector : BackgroundService
             // No logs in the last 3 minutes → server is hung
             _flaggedAsHung.Add(containerName);
             _serverStartTime.TryRemove(containerName, out _); // reset uptime tracking
-            _sixHourAlertSent.Remove(containerName);
+            _twelveHourAlertSent.Remove(containerName);
 
             if (_lastAlertTime.TryGetValue(containerName, out DateTime lastSent) &&
                 DateTime.UtcNow - lastSent < _alertInterval)
@@ -114,20 +114,20 @@ public class ServerHungDetector : BackgroundService
             _lastAlertTime.TryRemove(containerName, out _);
         }
 
-        // Track uptime and alert at 6 hours
+        // Track uptime and alert at 12 hours
         if (!_serverStartTime.ContainsKey(containerName))
         {
             _serverStartTime[containerName] = DateTime.UtcNow;
-            _sixHourAlertSent.Remove(containerName); // reset if restarted
+            _twelveHourAlertSent.Remove(containerName); // reset if restarted
         }
 
-        if (!_sixHourAlertSent.Contains(containerName) &&
-            DateTime.UtcNow - _serverStartTime[containerName] >= TimeSpan.FromHours(6))
+        if (!_twelveHourAlertSent.Contains(containerName) &&
+            DateTime.UtcNow - _serverStartTime[containerName] >= TimeSpan.FromHours(12))
         {
             var uptime = DateTime.UtcNow - _serverStartTime[containerName];
             await SendDiscordAlert(containerName,
                 $"ℹ️ **Server Uptime**: `{serverName}` has been running for {uptime.TotalHours:F0} hours.");
-            _sixHourAlertSent.Add(containerName);
+            _twelveHourAlertSent.Add(containerName);
         }
     }
 

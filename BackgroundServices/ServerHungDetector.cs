@@ -62,7 +62,7 @@ public class ServerHungDetector : BackgroundService
 
         if (target is not { State: "running" })
         {
-            _logger.LogDebug("Container {Name}: not found or not running, skipping", containerName);
+            _logger.LogWarning("Container {Name}: not found or not running, skipping", containerName);
             return;
         }
 
@@ -71,67 +71,36 @@ public class ServerHungDetector : BackgroundService
             ShowStdout = true,
             ShowStderr = true,
             Timestamps = true,
-            Tail = "1"
+            Since = DateTimeOffset.UtcNow.Subtract(_timeout).ToUnixTimeSeconds().ToString() // only fetch logs within the timeout window
         };
 
         using var response = await _dockerClient.Containers.GetContainerLogsAsync(target.ID, false, logParams, ct);
         var (stdout, stderr) = await response.ReadOutputToEndAsync(ct);
 
-        if (string.IsNullOrWhiteSpace(stdout))
+        var logLine = !string.IsNullOrWhiteSpace(stdout) ? stdout : stderr;
+
+        if (string.IsNullOrWhiteSpace(logLine))
         {
-            _logger.LogWarning("Container {Name}: no log output yet", containerName);
-            return;
+            // No logs in the last 6 minutes → server is hung
+            _flaggedAsHung.Add(containerName);
+
+            if (_lastAlertTime.TryGetValue(containerName, out DateTime lastSent) &&
+                DateTime.UtcNow - lastSent < _alertInterval)
+                return;
+
+            await SendDiscordAlert(containerName, $"@here ⚠️ **Server Hung**: `{containerName}` silent for over {_timeout.TotalMinutes:F0}m.");
+            _lastAlertTime[containerName] = DateTime.UtcNow;
         }
-        _logger.LogInformation("Container {Name}: raw stdout='{Stdout}' stderr='{Stderr}'", 
-            containerName, stdout, stderr);
-        
-        // ReadOutputToEndAsync already strips Docker's binary header — no offset needed
-        var spaceIndex = stdout.IndexOf(' ');
-        if (spaceIndex < 0)
+        else if (_flaggedAsHung.Contains(containerName))
         {
-            _logger.LogWarning("Container {Name}: could not find timestamp separator: '{Raw}'", containerName, stdout);
-            return;
-        }
-
-        var timestampPart = stdout.Substring(0, spaceIndex);
-        _logger.LogWarning("Container {Name}: last log timestamp = '{Timestamp}'", containerName, timestampPart);
-
-        if (DateTime.TryParse(timestampPart, null, System.Globalization.DateTimeStyles.RoundtripKind,
-                out DateTime lastLogTime))
-        {
-            var silenceDuration = DateTime.UtcNow - lastLogTime;
-            _logger.LogWarning("Container {Name}: silence duration = {Minutes:F1}m", containerName,
-                silenceDuration.TotalMinutes);
-
-            if (silenceDuration > _timeout)
-            {
-                _flaggedAsHung.Add(containerName);
-
-                if (_lastAlertTime.TryGetValue(containerName, out DateTime lastSent) &&
-                    DateTime.UtcNow - lastSent < _alertInterval)
-                {
-                    return;
-                }
-
-                await SendDiscordAlert(containerName,
-                    $"@here ⚠️ **Server Hung**: `{containerName}` silent for {silenceDuration.TotalMinutes:F1}m.");
-                _lastAlertTime[containerName] = DateTime.UtcNow;
-            }
-            else if (_flaggedAsHung.Contains(containerName))
-            {
-                await SendDiscordAlert(containerName, $"✅ **Server Recovered**: `{containerName}` is logging again.");
-                _flaggedAsHung.Remove(containerName);
-                _lastAlertTime.TryRemove(containerName, out _);
-            }
-        }
-        else
-        {
-            _logger.LogWarning("Container {Name}: failed to parse timestamp '{Timestamp}'", containerName,
-                timestampPart);
+            // Logs are flowing again
+            await SendDiscordAlert(containerName, $"✅ **Server Recovered**: `{containerName}` is logging again.");
+            _flaggedAsHung.Remove(containerName);
+            _lastAlertTime.TryRemove(containerName, out _);
         }
     }
 
-    private async Task SendDiscordAlert(string serverName, string message)
+    private static async Task SendDiscordAlert(string serverName, string message)
     {
         using var client = new HttpClient();
         var webhookUrl = Environment.GetEnvironmentVariable("DISCORD_WEBHOOK_URL");

@@ -21,7 +21,7 @@ public class ServerHungDetector : BackgroundService
     private readonly ConcurrentDictionary<string, DateTime> _lastAlertTime = new();
     private readonly TimeSpan _alertInterval = TimeSpan.FromMinutes(10);
     private readonly HashSet<string> _flaggedAsHung = new(); // Tracks if a server is currently in a "hung" state
-    
+
     public ServerHungDetector(ILogger<ServerHungDetector> logger)
     {
         _logger = logger;
@@ -30,9 +30,9 @@ public class ServerHungDetector : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var envNames = Environment.GetEnvironmentVariable("SERVER_CONTAINER_NAMES") 
+        var envNames = Environment.GetEnvironmentVariable("SERVER_CONTAINER_NAMES")
                        ?? throw new Exception("SERVER_CONTAINER_NAMES env is missing");
-    
+
         var containerNames = envNames.Split(',').Select(s => s.Trim()).ToList();
 
         while (!stoppingToken.IsCancellationRequested)
@@ -60,7 +60,11 @@ public class ServerHungDetector : BackgroundService
 
         var target = containers.FirstOrDefault(c => c.Names.Any(n => n.Contains(containerName)));
 
-        if (target is not { State: "running" }) return;
+        if (target is not { State: "running" })
+        {
+            _logger.LogDebug("Container {Name}: not found or not running, skipping", containerName);
+            return;
+        }
 
         var logParams = new ContainerLogsParameters
         {
@@ -73,51 +77,59 @@ public class ServerHungDetector : BackgroundService
         using var response = await _dockerClient.Containers.GetContainerLogsAsync(target.ID, false, logParams, ct);
         var (stdout, _) = await response.ReadOutputToEndAsync(ct);
 
-        // if (string.IsNullOrWhiteSpace(stdout) || stdout.Length < 38) {
-        //     _logger.LogWarning($"Container `{containerName}` IsNullOrWhiteSpace");
-        //     return;
-        // }
+        // Strip the 8-byte Docker multiplexed stream header
+        if (stdout.Length <= 8)
+        {
+            _logger.LogDebug("Container {Name}: no log output yet", containerName);
+            return;
+        }
 
-        _logger.LogWarning("Container {Name}: stdout is {stdout}", containerName, stdout);
-        var rawLog = stdout.Substring(8);  // strip the 8-byte Docker header
+        var rawLog = stdout.Substring(8);
+
+        // Find the space separating timestamp from log content
         var spaceIndex = rawLog.IndexOf(' ');
-        if (spaceIndex < 0) return;
+        if (spaceIndex < 0)
+        {
+            _logger.LogWarning("Container {Name}: could not find timestamp separator in log line: '{Raw}'",
+                containerName, rawLog);
+            return;
+        }
 
         var timestampPart = rawLog.Substring(0, spaceIndex);
+        _logger.LogDebug("Container {Name}: last log timestamp = '{Timestamp}'", containerName, timestampPart);
 
-        if (DateTime.TryParse(timestampPart, out DateTime lastLogTime))
+        if (DateTime.TryParse(timestampPart, null, System.Globalization.DateTimeStyles.RoundtripKind,
+                out DateTime lastLogTime))
         {
-            var silenceDuration = DateTime.UtcNow - lastLogTime.ToUniversalTime();
+            var silenceDuration = DateTime.UtcNow - lastLogTime;
+            _logger.LogDebug("Container {Name}: silence duration = {Minutes:F1}m", containerName,
+                silenceDuration.TotalMinutes);
 
             if (silenceDuration > _timeout)
             {
-                _flaggedAsHung.Add(containerName); // Mark as currently hung
-                _logger.LogWarning($"Container `{containerName}` has been silent for {silenceDuration.TotalMinutes:F1} minutes.");
+                _flaggedAsHung.Add(containerName);
 
-
-                if (_lastAlertTime.TryGetValue(containerName, out DateTime lastSent) && 
+                if (_lastAlertTime.TryGetValue(containerName, out DateTime lastSent) &&
                     DateTime.UtcNow - lastSent < _alertInterval)
                 {
-                    _logger.LogWarning("Container {Name}: already flagged and alerted ", containerName);
-                    return; 
+                    return;
                 }
 
-                _logger.LogWarning("Container {Name}: is hung", containerName);
-                await SendDiscordAlert(containerName, $"@here ⚠️ **Server Hung**: `{containerName}` silent for {silenceDuration.TotalMinutes:F1}m.");
+                await SendDiscordAlert(containerName,
+                    $"@here ⚠️ **Server Hung**: `{containerName}` silent for {silenceDuration.TotalMinutes:F1}m.");
                 _lastAlertTime[containerName] = DateTime.UtcNow;
             }
             else if (_flaggedAsHung.Contains(containerName))
             {
-                // Server was hung, but now logs are flowing again
                 await SendDiscordAlert(containerName, $"✅ **Server Recovered**: `{containerName}` is logging again.");
-                
                 _flaggedAsHung.Remove(containerName);
                 _lastAlertTime.TryRemove(containerName, out _);
             }
         }
         else
         {
-            _logger.LogWarning("Container {Name}: failed to parse timestamp '{Raw}'", containerName, timestampPart);
+            _logger.LogWarning("Container {Name}: failed to parse timestamp '{Timestamp}'", containerName,
+                timestampPart);
         }
     }
 
@@ -125,7 +137,7 @@ public class ServerHungDetector : BackgroundService
     {
         using var client = new HttpClient();
         var webhookUrl = Environment.GetEnvironmentVariable("DISCORD_WEBHOOK_URL");
-        
+
         if (string.IsNullOrEmpty(webhookUrl)) return;
 
         var content = new { content = message };

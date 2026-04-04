@@ -67,12 +67,17 @@ public class ServerHungDetector : BackgroundService
         using var response = await _dockerClient.Containers.GetContainerLogsAsync(target.ID, false, logParams, ct);
         var (stdout, _) = await response.ReadOutputToEndAsync(ct);
 
-        if (string.IsNullOrWhiteSpace(stdout) || stdout.Length < 38) {
-            _logger.LogWarning($"Container `{containerName}` IsNullOrWhiteSpace");
-            return;
-        }
+        // if (string.IsNullOrWhiteSpace(stdout) || stdout.Length < 38) {
+        //     _logger.LogWarning($"Container `{containerName}` IsNullOrWhiteSpace");
+        //     return;
+        // }
 
-        var timestampPart = stdout.Substring(8, 30); 
+        _logger.LogWarning("Container {Name}: stdout is {stdout}", containerName, stdout);
+        var rawLog = stdout.Substring(8);  // strip the 8-byte Docker header
+        var spaceIndex = rawLog.IndexOf(' ');
+        if (spaceIndex < 0) return;
+
+        var timestampPart = rawLog.Substring(0, spaceIndex);
 
         if (DateTime.TryParse(timestampPart, out DateTime lastLogTime))
         {
@@ -83,12 +88,15 @@ public class ServerHungDetector : BackgroundService
                 _flaggedAsHung.Add(containerName); // Mark as currently hung
                 _logger.LogWarning($"Container `{containerName}` has been silent for {silenceDuration.TotalMinutes:F1} minutes.");
 
+
                 if (_lastAlertTime.TryGetValue(containerName, out DateTime lastSent) && 
                     DateTime.UtcNow - lastSent < _alertInterval)
                 {
-                    return;
+                    _logger.LogWarning("Container {Name}: already flagged and alerted ", containerName);
+                    return; 
                 }
 
+                _logger.LogWarning("Container {Name}: is hung", containerName);
                 await SendDiscordAlert(containerName, $"@here ⚠️ **Server Hung**: `{containerName}` silent for {silenceDuration.TotalMinutes:F1}m.");
                 _lastAlertTime[containerName] = DateTime.UtcNow;
             }
@@ -100,6 +108,10 @@ public class ServerHungDetector : BackgroundService
                 _flaggedAsHung.Remove(containerName);
                 _lastAlertTime.TryRemove(containerName, out _);
             }
+        }
+        else
+        {
+            _logger.LogWarning("Container {Name}: failed to parse timestamp '{Raw}'", containerName, timestampPart);
         }
     }
 

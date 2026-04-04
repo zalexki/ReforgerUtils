@@ -109,7 +109,7 @@ public class ServerHungDetector : BackgroundService
         else if (_flaggedAsHung.Contains(containerName))
         {
             // recovery alert - existing code
-            await SendDiscordAlert(containerName, $"✅ **Server Recovered**: `{containerName}` is logging again.");
+            await SendDiscordAlert(containerName, $"✅ **Server Recovered**: `{serverName}` is logging again.");
             _flaggedAsHung.Remove(containerName);
             _lastAlertTime.TryRemove(containerName, out _);
         }

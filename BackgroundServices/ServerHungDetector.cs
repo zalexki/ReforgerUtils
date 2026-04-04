@@ -79,10 +79,12 @@ public class ServerHungDetector : BackgroundService
 
         if (string.IsNullOrWhiteSpace(stdout))
         {
-            _logger.LogDebug("Container {Name}: no log output yet", containerName);
+            _logger.LogWarning("Container {Name}: no log output yet", containerName);
             return;
         }
-
+        _logger.LogInformation("Container {Name}: raw stdout='{Stdout}' stderr='{Stderr}'", 
+            containerName, stdout, stderr);
+        
         // ReadOutputToEndAsync already strips Docker's binary header — no offset needed
         var spaceIndex = stdout.IndexOf(' ');
         if (spaceIndex < 0)
@@ -92,13 +94,13 @@ public class ServerHungDetector : BackgroundService
         }
 
         var timestampPart = stdout.Substring(0, spaceIndex);
-        _logger.LogDebug("Container {Name}: last log timestamp = '{Timestamp}'", containerName, timestampPart);
+        _logger.LogWarning("Container {Name}: last log timestamp = '{Timestamp}'", containerName, timestampPart);
 
         if (DateTime.TryParse(timestampPart, null, System.Globalization.DateTimeStyles.RoundtripKind,
                 out DateTime lastLogTime))
         {
             var silenceDuration = DateTime.UtcNow - lastLogTime;
-            _logger.LogDebug("Container {Name}: silence duration = {Minutes:F1}m", containerName,
+            _logger.LogWarning("Container {Name}: silence duration = {Minutes:F1}m", containerName,
                 silenceDuration.TotalMinutes);
 
             if (silenceDuration > _timeout)

@@ -6,6 +6,10 @@ services:
       dockerfile: Dockerfile
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Host path is deployment-specific. Mount the shared admin JSON into the container:
+      # - /path/on/host/admins.json:/admins.json:ro
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - SERVER_CONTAINER_NAMES=koth1-koth-reforged-1-1,koth2-koth-reforged-2-1,koth3-koth-reforged-3-1,arma-koth-reforged-1-1,arma2-koth-reforged-2-1,arma3-koth-reforged-3-1
+      - ADMIN_LIST_FILE_PATH=/admins.json
+      - ADMIN_SYNC_INTERVAL_SECONDS=30

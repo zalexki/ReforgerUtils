@@ -10,6 +10,7 @@
     "name": "Escalation PvP | Teamwork, Squads & Roles",
     "password": "",
     "passwordAdmin": "lab6admin",
+    "admins": [],
     "scenarioId": "{886051359283655E}Missions/Eden_AAS_GreenValley_64_US_USSR.conf",
     "maxPlayers": 64,
     "autoJoinable": false,

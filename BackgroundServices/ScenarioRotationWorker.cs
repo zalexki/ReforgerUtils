@@ -9,7 +9,6 @@ using Docker.DotNet;
 using Docker.DotNet.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace ReforgerScenarioRotation.BackgroundServices;
@@ -18,25 +17,29 @@ public class MultiServerScenarioRotationWorker : BackgroundService
 {
     private readonly ILogger<MultiServerScenarioRotationWorker> _logger;
     private readonly DockerClient _dockerClient;
+    private readonly ServerConfigStore _serverConfigStore;
+    private readonly AdminListLoader _adminListLoader;
 
     // Dictionary to store scenario history for each server
     private readonly ConcurrentDictionary<string, List<string>> _serverScenarioHistory;
 
-    private const string SERVER_CONFIG_FILE_PATH_TEMPLATE = "/server{0}/config.json";
     private const string LIST_SCENARIOS_FILE_PATH_TEMPLATE = "/server{0}/list_scenarios.json";
 
     // List of container names for all servers
     private readonly List<string> _serverContainerNames;
 
-    public MultiServerScenarioRotationWorker(ILogger<MultiServerScenarioRotationWorker> logger)
+    public MultiServerScenarioRotationWorker(
+        ILogger<MultiServerScenarioRotationWorker> logger,
+        ServerConfigStore serverConfigStore,
+        AdminListLoader adminListLoader)
     {
         _logger = logger;
+        _serverConfigStore = serverConfigStore;
+        _adminListLoader = adminListLoader;
         _dockerClient = new DockerClientConfiguration().CreateClient();
         _serverScenarioHistory = new ConcurrentDictionary<string, List<string>>();
 
-        // Get container names from environment variables
-        string serverNamesEnv = Environment.GetEnvironmentVariable("SERVER_CONTAINER_NAMES") ?? "arma-server-1,arma-server-2,arma-server-3";
-        _serverContainerNames = serverNamesEnv.Split(',').Select(s => s.Trim()).ToList();
+        _serverContainerNames = ServerConfigStore.GetServerContainerNames().ToList();
 
         // Initialize history for each server
         foreach (var containerName in _serverContainerNames)
@@ -97,34 +100,34 @@ public class MultiServerScenarioRotationWorker : BackgroundService
 
     private void RandomizeScenario(string containerName)
     {
-        // Extract server index from container name patterns like arma3-koth-reforged-3-1
-        string serverIndex = GetServerIndex(containerName);
-
-        string configFilePath = string.Format(SERVER_CONFIG_FILE_PATH_TEMPLATE, serverIndex);
-        string configText = File.ReadAllText(configFilePath);
-        var json = JObject.Parse(configText);
+        string serverIndex = ServerConfigStore.GetServerIndex(containerName);
+        string configFilePath = ServerConfigStore.GetConfigFilePath(containerName);
 
         var scenarioId = PickRandomScenario(containerName, serverIndex);
-        json["game"]["scenarioId"] = scenarioId;
-        _logger.LogInformation("Server {ServerName}: scenario selected {SelectedScenario}", containerName, scenarioId);
-
-        File.WriteAllText(configFilePath, JsonConvert.SerializeObject(json, Formatting.Indented));
-    }
-
-    private string GetServerIndex(string containerName)
-    {
-        // Handle patterns like arma3-koth-reforged-3-1, koth3-koth-reforged-3-1
-        if (containerName.Contains("reforged"))
+        IReadOnlyList<string> adminIds = null;
+        if (_adminListLoader.TryLoad(out var adminEntries))
         {
-            var parts = containerName.Split('-');
-            if (parts.Length >= 3)
-            {
-                // Get the number after "reforged-"
-                return parts[parts.Length - 2];
-            }
+            adminIds = adminEntries.Select(e => e.Id).ToList();
         }
 
-        return "1"; // Default fallback
+        _serverConfigStore.Update(configFilePath, json =>
+        {
+            json["game"]["scenarioId"] = scenarioId;
+            if (adminIds is not null)
+            {
+                json["game"]["admins"] = new JArray(adminIds);
+            }
+        });
+
+        _logger.LogInformation("Server {ServerName}: scenario selected {SelectedScenario}", containerName, scenarioId);
+        if (adminIds is not null)
+        {
+            _logger.LogInformation(
+                "Server {ServerName}: applied {Count} admins on restart [{Admins}]",
+                containerName,
+                adminIds.Count,
+                AdminListLoader.FormatEntries(adminEntries));
+        }
     }
 
     private string PickRandomScenario(string containerName, string serverIndex)

@@ -18,11 +18,9 @@ public class ServerHungDetector : BackgroundService
     private readonly ILogger<ServerHungDetector> _logger;
     private readonly DockerClient _dockerClient;
     private readonly TimeSpan _timeout = TimeSpan.FromMinutes(5);
-    private readonly ConcurrentDictionary<string, DateTime> _lastAlertTime = new();
-    private readonly TimeSpan _alertInterval = TimeSpan.FromMinutes(10);
-    private readonly HashSet<string> _flaggedAsHung = new(); // Tracks if a server is currently in a "hung" state
+    private readonly ConcurrentDictionary<string, byte> _flaggedAsHung = new();
     private readonly ConcurrentDictionary<string, DateTime> _serverStartTime = new();
-    private readonly HashSet<string> _twelveHourAlertSent = new();
+    private readonly ConcurrentDictionary<string, byte> _twelveHourAlertSent = new();
 
     public ServerHungDetector(ILogger<ServerHungDetector> logger)
     {
@@ -35,7 +33,7 @@ public class ServerHungDetector : BackgroundService
         var envNames = Environment.GetEnvironmentVariable("SERVER_CONTAINER_NAMES")
                        ?? throw new Exception("SERVER_CONTAINER_NAMES env is missing");
 
-        var containerNames = envNames.Split(',').Select(s => s.Trim()).ToList();
+        var containerNames = envNames.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -60,78 +58,78 @@ public class ServerHungDetector : BackgroundService
         var containers = await _dockerClient.Containers.ListContainersAsync(
             new ContainersListParameters { All = true }, ct);
 
-        var target = containers.FirstOrDefault(c => c.Names.Any(n => n.Contains(containerName)));
+        var target = containers.FirstOrDefault(c =>
+            HungLogEvaluator.MatchesContainerName(c.Names, containerName) && c.State == "running");
 
-        if (target is not { State: "running" })
+        if (target is null)
         {
             _logger.LogWarning("Container {Name}: not found or not running, skipping", containerName);
             return;
         }
+
+        var inspect = await _dockerClient.Containers.InspectContainerAsync(target.ID, ct);
+        var tty = inspect.Config?.Tty ?? false;
 
         var logParams = new ContainerLogsParameters
         {
             ShowStdout = true,
             ShowStderr = true,
             Timestamps = true,
-            Since = DateTimeOffset.UtcNow.Subtract(_timeout).ToUnixTimeSeconds()
-                .ToString() // only fetch logs within the timeout window
+            Tail = "50"
         };
 
-        using var response = await _dockerClient.Containers.GetContainerLogsAsync(target.ID, false, logParams, ct);
+        using var response = await _dockerClient.Containers.GetContainerLogsAsync(target.ID, tty, logParams, ct);
         var (stdout, stderr) = await response.ReadOutputToEndAsync(ct);
 
-        var logLine = !string.IsNullOrWhiteSpace(stdout) ? stdout : stderr;
-        var serverName = containerName switch
-        {
-            "koth2-koth-reforged-2-1" => "EU-2",
-            "koth3-koth-reforged-3-1" => "EU-3",
-            "arma-koth-reforged-1-1" => "NA-1",
-            "arma2-koth-reforged-2-1" => "NA-2",
-            "arma3-koth-reforged-3-1" => "NA-3",
-            _ => "EU-1"
-        };
-        
-        if (string.IsNullOrWhiteSpace(logLine))
-        {
-            // No logs in the last 3 minutes → server is hung
-            _flaggedAsHung.Add(containerName);
-            _serverStartTime.TryRemove(containerName, out _); // reset uptime tracking
-            _twelveHourAlertSent.Remove(containerName);
+        var now = DateTimeOffset.UtcNow;
+        var result = HungLogEvaluator.Evaluate(stdout, stderr, now, _timeout);
+        var lastLog = HungLogEvaluator.TryGetLastLogTimestamp(stdout, stderr);
+        var serverName = HungLogEvaluator.ToDisplayName(containerName);
+        var wasHung = _flaggedAsHung.ContainsKey(containerName);
 
-            if (_lastAlertTime.TryGetValue(containerName, out DateTime lastSent) &&
-                DateTime.UtcNow - lastSent < _alertInterval)
-                return;
+        _logger.LogInformation(
+            "Hung check {Container} ({Display}): result={Result} lastLog={LastLog} stdoutChars={Stdout} stderrChars={Stderr}",
+            containerName, serverName, result, lastLog, stdout?.Length ?? 0, stderr?.Length ?? 0);
 
-            await SendDiscordAlert(containerName,
-                $"@here ⚠️ **Server Hung**: `{serverName}` silent for over {_timeout.TotalMinutes:F0}m.");
-            _lastAlertTime[containerName] = DateTime.UtcNow;
-        }
-        else if (_flaggedAsHung.Contains(containerName))
+        if (result == HungCheckResult.Inconclusive)
         {
-            // recovery alert - existing code
-            await SendDiscordAlert(containerName, $"✅ **Server Recovered**: `{serverName}` is logging again.");
-            _flaggedAsHung.Remove(containerName);
-            _lastAlertTime.TryRemove(containerName, out _);
+            _logger.LogWarning(
+                "Container {Name}: no parseable docker log timestamp, not treating as hung",
+                containerName);
         }
 
-        // Track uptime and alert at 12 hours
+        if (HungLogEvaluator.ShouldSendHungAlert(wasHung, result))
+        {
+            await SendDiscordAlert(
+                $"@here ⚠️ **Server Hung**: `{serverName}` last docker log is older than {_timeout.TotalMinutes:F0}m ({lastLog:u}).");
+        }
+        else if (HungLogEvaluator.ShouldSendRecoveryAlert(wasHung, result))
+        {
+            await SendDiscordAlert($"✅ **Server Recovered**: `{serverName}` is logging again.");
+        }
+
+        if (HungLogEvaluator.IsNowHung(wasHung, result))
+            _flaggedAsHung.TryAdd(containerName, 0);
+        else
+            _flaggedAsHung.TryRemove(containerName, out _);
+
         if (!_serverStartTime.ContainsKey(containerName))
         {
             _serverStartTime[containerName] = DateTime.UtcNow;
-            _twelveHourAlertSent.Remove(containerName); // reset if restarted
+            _twelveHourAlertSent.TryRemove(containerName, out _);
         }
 
-        if (!_twelveHourAlertSent.Contains(containerName) &&
+        if (!_twelveHourAlertSent.ContainsKey(containerName) &&
             DateTime.UtcNow - _serverStartTime[containerName] >= TimeSpan.FromHours(12))
         {
             var uptime = DateTime.UtcNow - _serverStartTime[containerName];
-            await SendDiscordAlert(containerName,
+            await SendDiscordAlert(
                 $"ℹ️ **Server Uptime**: `{serverName}` has been running for {uptime.TotalHours:F0} hours.");
-            _twelveHourAlertSent.Add(containerName);
+            _twelveHourAlertSent.TryAdd(containerName, 0);
         }
     }
 
-    private static async Task SendDiscordAlert(string serverName, string message)
+    private static async Task SendDiscordAlert(string message)
     {
         using var client = new HttpClient();
         var webhookUrl = Environment.GetEnvironmentVariable("DISCORD_WEBHOOK_URL");

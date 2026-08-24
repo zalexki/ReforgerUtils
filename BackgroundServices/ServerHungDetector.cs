@@ -1,15 +1,15 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
+using System.Net.Http;
+using System.Net.Http.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Docker.DotNet;
 using Docker.DotNet.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
 
 namespace ReforgerScenarioRotation.BackgroundServices;
 
@@ -17,147 +17,126 @@ public class ServerHungDetector : BackgroundService
 {
     private readonly ILogger<ServerHungDetector> _logger;
     private readonly DockerClient _dockerClient;
-
-    private List<string> _containerNames;
-    private readonly TimeSpan _timeout;
+    private readonly TimeSpan _timeout = TimeSpan.FromMinutes(5);
+    private readonly ConcurrentDictionary<string, byte> _flaggedAsHung = new();
+    private readonly ConcurrentDictionary<string, DateTime> _serverStartTime = new();
+    private readonly ConcurrentDictionary<string, byte> _twelveHourAlertSent = new();
 
     public ServerHungDetector(ILogger<ServerHungDetector> logger)
     {
         _logger = logger;
-        _timeout = TimeSpan.FromSeconds(360);
         _dockerClient = new DockerClientConfiguration().CreateClient();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var names = Environment.GetEnvironmentVariable("SERVER_CONTAINER_NAMES") ?? throw new Exception("missing SERVER_CONTAINER_NAMES env");
-        _containerNames = names.Split(',').ToList();
-        // _containerNames = "reforgerscenariorotation-test_container-1,other_container".Split(',').ToList();
+        var envNames = Environment.GetEnvironmentVariable("SERVER_CONTAINER_NAMES")
+                       ?? throw new Exception("SERVER_CONTAINER_NAMES env is missing");
 
-        while (true)
+        var containerNames = envNames.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
+
+        while (!stoppingToken.IsCancellationRequested)
         {
-            foreach (var containerName in _containerNames)
+            try
             {
-                _logger.LogInformation($" Start Check {containerName}");
-                await CheckAndRestartContainer(containerName, stoppingToken);
-                _logger.LogInformation($" End Check {containerName}");
+                foreach (var name in containerNames)
+                {
+                    await InspectContainerLogs(name, stoppingToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in ServerHungDetector loop");
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
         }
     }
 
-    private async Task CheckAndRestartContainer(string containerName, CancellationToken stoppingToken)
+    private async Task InspectContainerLogs(string containerName, CancellationToken ct)
     {
-        var container = (await _dockerClient.Containers.ListContainersAsync(new ContainersListParameters
-        {
-            All = true
-        })).FirstOrDefault(c => c.Names.Any(name => name.Contains(containerName)));
+        var containers = await _dockerClient.Containers.ListContainersAsync(
+            new ContainersListParameters { All = true }, ct);
 
-        if (container == null)
+        var target = containers.FirstOrDefault(c =>
+            HungLogEvaluator.MatchesContainerName(c.Names, containerName) && c.State == "running");
+
+        if (target is null)
         {
-            _logger.LogInformation($"Container {containerName} not found.");
+            _logger.LogWarning("Container {Name}: not found or not running, skipping", containerName);
             return;
         }
 
-        DateTime lastLogTime = DateTime.UtcNow;
+        var inspect = await _dockerClient.Containers.InspectContainerAsync(target.ID, ct);
+        var tty = inspect.Config?.Tty ?? false;
 
         var logParams = new ContainerLogsParameters
         {
             ShowStdout = true,
             ShowStderr = true,
             Timestamps = true,
-            Follow = false,
-            Tail = "1"
+            Tail = "50"
         };
 
-        var dateNow = DateTime.UtcNow;
-        
-        var applicationHang = false;
-        using (var logs = await _dockerClient.Containers.GetContainerLogsAsync(container.ID, false, logParams, stoppingToken))
+        using var response = await _dockerClient.Containers.GetContainerLogsAsync(target.ID, tty, logParams, ct);
+        var (stdout, stderr) = await response.ReadOutputToEndAsync(ct);
+
+        var now = DateTimeOffset.UtcNow;
+        var result = HungLogEvaluator.Evaluate(stdout, stderr, now, _timeout);
+        var lastLog = HungLogEvaluator.TryGetLastLogTimestamp(stdout, stderr);
+        var serverName = HungLogEvaluator.ToDisplayName(containerName);
+        var wasHung = _flaggedAsHung.ContainsKey(containerName);
+
+        _logger.LogInformation(
+            "Hung check {Container} ({Display}): result={Result} lastLog={LastLog} stdoutChars={Stdout} stderrChars={Stderr}",
+            containerName, serverName, result, lastLog, stdout?.Length ?? 0, stderr?.Length ?? 0);
+
+        if (result == HungCheckResult.Inconclusive)
         {
-            if (logs != null)
-            {
-                var (stdout, stderr) = await logs.ReadOutputToEndAsync(stoppingToken);
-                string logLine = stdout; // Use stdout or stderr as needed
-
-                if (logLine.Length > 0)
-                {
-                    var logParts = logLine.Split(" ", StringSplitOptions.RemoveEmptyEntries);
-                    // _logger.LogInformation("logParts {logParts}", JsonConvert.SerializeObject(logParts, Formatting.Indented));
-                    foreach (var item in logParts)
-                    {
-                        // _logger.LogInformation("item {item}", JsonConvert.SerializeObject(item, Formatting.Indented));
-                        var dateString = FindDate(item);
-
-                        if (DateTime.TryParse(FindDate(dateString), out DateTime logTime))
-                        {
-                            _logger.LogInformation("logTime {logTime}", logTime);
-                            lastLogTime = logTime;
-                        }
-                    }
-                }
-            }
+            _logger.LogWarning(
+                "Container {Name}: no parseable docker log timestamp, not treating as hung",
+                containerName);
         }
 
-        var logParamsMoreLines = new ContainerLogsParameters
+        if (HungLogEvaluator.ShouldSendHungAlert(wasHung, result))
         {
-            ShowStdout = true,
-            ShowStderr = true,
-            Timestamps = true,
-            Follow = false,
-            Tail = "10"
-        };
-
-        using (var logs = await _dockerClient.Containers.GetContainerLogsAsync(container.ID, false, logParamsMoreLines))
+            await SendDiscordAlert(
+                $"@here ⚠️ **Server Hung**: `{serverName}` last docker log is older than {_timeout.TotalMinutes:F0}m ({lastLog:u}).");
+        }
+        else if (HungLogEvaluator.ShouldSendRecoveryAlert(wasHung, result))
         {
-            if (logs != null)
-            {
-                var (stdout, stderr) = await logs.ReadOutputToEndAsync(stoppingToken);
-                string logLines = stdout; // Use stdout or stderr as needed
-
-                if (logLines.Length > 0)
-                {
-                    if (logLines.Contains("Application hangs"))
-                    {
-                        _logger.LogWarning("Application hangs found gonna restart");
-                        applicationHang = true;
-                    }
-                }
-            }
+            await SendDiscordAlert($"✅ **Server Recovered**: `{serverName}` is logging again.");
         }
 
+        if (HungLogEvaluator.IsNowHung(wasHung, result))
+            _flaggedAsHung.TryAdd(containerName, 0);
+        else
+            _flaggedAsHung.TryRemove(containerName, out _);
 
-        var delta = dateNow - lastLogTime;
-        _logger.LogInformation("TimeDiff is {lastLogTime} and timeout is {timeout} so delta is {delta} for {containerName}",
-            JsonConvert.SerializeObject(lastLogTime, Formatting.Indented),
-            JsonConvert.SerializeObject(_timeout, Formatting.Indented),
-            JsonConvert.SerializeObject(delta, Formatting.Indented),
-            containerName);
-        if (delta > _timeout || applicationHang)
+        if (!_serverStartTime.ContainsKey(containerName))
         {
-            _logger.LogWarning($"No logs for {_timeout.TotalSeconds} seconds or app hung, restarting container: {containerName}");
-            await _dockerClient.Containers.RestartContainerAsync(container.ID, new ContainerRestartParameters());
+            _serverStartTime[containerName] = DateTime.UtcNow;
+            _twelveHourAlertSent.TryRemove(containerName, out _);
+        }
+
+        if (!_twelveHourAlertSent.ContainsKey(containerName) &&
+            DateTime.UtcNow - _serverStartTime[containerName] >= TimeSpan.FromHours(12))
+        {
+            var uptime = DateTime.UtcNow - _serverStartTime[containerName];
+            await SendDiscordAlert(
+                $"ℹ️ **Server Uptime**: `{serverName}` has been running for {uptime.TotalHours:F0} hours.");
+            _twelveHourAlertSent.TryAdd(containerName, 0);
         }
     }
 
-    private string FindDate(string data)
+    private static async Task SendDiscordAlert(string message)
     {
-        // Define the regex pattern to find dates in the specified format
-        string pattern = @"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z";
+        using var client = new HttpClient();
+        var webhookUrl = Environment.GetEnvironmentVariable("DISCORD_WEBHOOK_URL");
 
-        // Create a Regex object
-        Regex regex = new Regex(pattern);
+        if (string.IsNullOrEmpty(webhookUrl)) return;
 
-        // Find all matches in the text
-        MatchCollection matches = regex.Matches(data);
-
-        // Iterate through the matches and print them
-        foreach (Match match in matches)
-        {
-            return match.Value;
-        }
-
-        return string.Empty;
+        var content = new { content = message };
+        await client.PostAsJsonAsync(webhookUrl, content);
     }
 }
